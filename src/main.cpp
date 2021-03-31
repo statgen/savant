@@ -128,7 +128,7 @@ public:
 
   void print_usage(std::ostream& os)
   {
-    os << "Usage: sp-reg [opts ...] <geno_file> <pheno_file> \n";
+    os << "Usage: savant [opts ...] <geno_file> <pheno_file> \n";
     os << "\n";
     os << " -c, --cov            Comma separated list of covariate columns\n";
     os << " -h, --help           Print usage\n";
