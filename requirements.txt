@@ -1,0 +1,4 @@
+statgen/savvy
+xtensor-stack/xtl
+xtensor-stack/xtensor
+xtensor-stack/xtensor-blas
