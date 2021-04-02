@@ -6,11 +6,11 @@ include(GNUInstallDirs)
 set(CMAKE_CXX_STANDARD 17)
 include(CMakeFindDependencyMacro) # missing in xtensor-blasCMake.config
 find_package(xtensor-blas REQUIRED)
-#find_package(Boost REQUIRED)
+find_package(Boost REQUIRED)
 find_package(savvy REQUIRED)
 
 add_executable(savant src/main.cpp)
-target_include_directories(savant PRIVATE include)
+target_include_directories(savant PRIVATE include ${Boost_INCLUDE_DIRS})
 target_link_libraries(savant savvy xtensor-blas)
 
 

@@ -5,7 +5,12 @@
  */
 
 #include "tcdf.hpp"
-#include "savvy/reader.hpp"
+#include "logistic_score_model.hpp"
+#include "linear_model.hpp"
+
+#include <savvy/reader.hpp>
+
+#include <iostream>
 
 //#ifndef __cpp_lib_as_const
 //#define __cpp_lib_as_const
@@ -24,6 +29,8 @@
 #include <random>
 #include <chrono>
 #include <getopt.h>
+
+std::ofstream debug_log;
 
 std::vector<std::string> split_string_to_vector(const char* in, char delim)
 {
@@ -85,6 +92,7 @@ private:
   std::string geno_path_;
   std::string pheno_path_;
   std::string output_path_ = "/dev/stdout";
+  std::string debug_log_path_ = "/dev/stdnull";
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
   double min_mac_ = 1.0;
@@ -97,11 +105,13 @@ public:
     long_options_(
       {
         {"cov", required_argument, 0, 'c'},
+        {"debug-log", required_argument, 0, '\x02'},
         {"fmt-field", required_argument, 0, '\x02'},
         {"help", no_argument, 0, 'h'},
         {"id", required_argument, 0, 'i'},
         {"logit", no_argument, 0, 'b'},
         {"min-mac", required_argument, 0, '\x02'},
+        {"never-sparse", no_argument, 0, '\x01'},
         {"no-sparse", no_argument, 0, '\x01'},
         {"always-sparse", no_argument, 0, '\x01'},
         {"output", required_argument, 0, 'o'},
@@ -119,10 +129,11 @@ public:
   const std::string& pheno_path() const { return pheno_path_; }
   const std::string& output_path() const { return output_path_; }
   const std::string& fmt_field() const { return fmt_field_; }
+  const std::string& debug_log_path() const { return debug_log_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   double min_mac() const { return min_mac_; }
-  bool sparse_disabled() { return no_sparse_; }
-  bool force_sparse() { return always_sparse_; }
+  bool sparse_disabled() const { return no_sparse_; }
+  bool force_sparse() const { return always_sparse_; }
   bool logit_enabled() const { return logit_; }
   bool help_is_set() const { return help_; }
 
@@ -138,9 +149,10 @@ public:
     os << " -p, --pheno          Phenotype column\n";
     os << " -r, --region         Genomic region to test (chrom:beg-end)\n";
     os << "     --min-mac        Minimum minor allele count (default: 1)\n";
-    os << "     --no-sparse      Disables sparse optimizations\n";
+    os << "     --never-sparse   Disables sparse optimizations\n";
     os << "     --always-sparse  Forces sparse optimizations even for dense file records\n";
     os << "     --fmt-field      Format field to use (DS, HDS, or GT)\n";
+    os << "     --debug-log      Enables debug logging and specifies log file\n";
     os << std::flush;
   }
 
@@ -154,7 +166,7 @@ public:
       switch (copt)
       {
       case '\x01':
-        if (std::string("no-sparse") == long_options_[long_index].name)
+        if (std::string("never-sparse") == long_options_[long_index].name || std::string("no-sparse") == long_options_[long_index].name)
         {
           no_sparse_ = true;
         }
@@ -177,6 +189,10 @@ public:
           fmt_field_ = optarg ? optarg : "";
           if (fmt_field_ != "DS" && fmt_field_ != "HDS" && fmt_field_ != "GT")
             return std::cerr << "Error: --fmt-field must be DS, HDS, or GT\n", false;
+        }
+        else if (std::string("debug-log") == long_options_[long_index].name)
+        {
+          debug_log_path_ = optarg ? optarg : "";
         }
         else
         {
@@ -827,6 +843,84 @@ void challenger_test()
   auto a = 0;
 }
 
+template <typename ModelT>
+int run_single(const prog_args& args, savvy::reader& geno_file, const std::string& format_field, const ModelT& mdl)
+{
+  auto start = std::chrono::steady_clock::now();
+  std::ofstream output_file(args.output_path(), std::ios::binary);
+  //output_file <<  "#chrom\tpos\tmaf\tmac\tbeta\tse\tt\tpval\n";
+  output_file << "#chrom\tpos\tmaf\tmac\t" << mdl << std::endl;
+
+  savvy::variant var;
+  savvy::compressed_vector<scalar_type> sparse_geno;
+  std::vector<scalar_type> dense_geno;
+  while (geno_file >> var)
+  {
+    std::size_t ploidy = 0;
+    bool is_sparse = false;
+    bool found = false;
+    for (const auto& f : var.format_fields())
+    {
+      if (f.first == format_field)
+      {
+        found = true;
+        is_sparse = args.force_sparse() || (!args.sparse_disabled() && f.second.is_sparse());
+        is_sparse ? f.second.get(sparse_geno) : f.second.get(dense_geno);
+        ploidy = is_sparse ? sparse_geno.size() / mdl.sample_size() : dense_geno.size() / mdl.sample_size();
+        assert(is_sparse ? sparse_geno.size() % mdl.sample_size() == 0 : dense_geno.size() % mdl.sample_size() == 0);
+        is_sparse ? savvy::stride_reduce(sparse_geno, ploidy) : savvy::stride_reduce(dense_geno, ploidy);
+        break;
+      }
+    }
+
+    if (!found)
+    {
+      std::cerr << "Warning: skipping variant with not GT field\n";
+      continue;
+    }
+
+    assert(ploidy != 0);
+
+    float ac = 0.f, af = 0.f;
+    std::int64_t an = 0;
+    // For now, we are pulling from INFO fields but will likely always compute AC (along with case/ctrl AC) in the future.
+    if (var.get_info("AC", ac) && var.get_info("AN", an) && an > 0)
+    {
+      af = float(ac) / an;
+    }
+    else if (!var.get_info("AF", af))
+    {
+      // For computing ac and af we use AN of sample subset.
+      an = (mdl.sample_size() * ploidy);
+      ac = is_sparse ? std::accumulate(sparse_geno.begin(), sparse_geno.end(), 0.f) : std::accumulate(dense_geno.begin(), dense_geno.end(), 0.f);
+      af = ac / an;
+    }
+    else
+    {
+      an = (geno_file.samples().size() * ploidy);
+      ac = af * an;
+    }
+
+    float mac = (ac > (an/2) ? an - ac : ac);
+    float maf = (af > 0.5 ? 1.f - af : af);
+
+    if (mac < args.min_mac()) continue;
+
+    auto stats = is_sparse ? mdl.test_single(sparse_geno) : mdl.test_single(dense_geno);
+    output_file << var.chromosome()
+                << "\t" << var.position()
+                << "\t" << maf
+                << "\t" << mac
+                << "\t" << stats << "\n";
+  }
+  std::size_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+  std::cerr << "Analysis time (ms): " << elapsed_ms << std::endl;
+
+  // gzip -cd sp-reg-results-chr19-ldl.tsv | tail -n+2 | awk -F'\t' '$4>5  {print $2"\t"$8}' | gnuplot --persist -e "set logscale y; set yrange [0.99:5e-32] reverse; set xrange [1:65000000]; plot '-' using 1:2 w points"
+
+  return geno_file.bad() ? EXIT_FAILURE : EXIT_SUCCESS;
+}
+
 int main(int argc, char** argv)
 {
   //challenger_test();
@@ -846,10 +940,12 @@ int main(int argc, char** argv)
     return EXIT_SUCCESS;
   }
 
+  if (args.debug_log_path().size())
+    debug_log.open(args.debug_log_path());
+
 //  std::string pheno_file_path = "../test-data/pheno_2000.tsv";
 //  std::string geno_file_path = "../test-data/rand2000.freeze9.merged.chr20.filtered.anno.gtonly.minDP10.passonly.w280000.ligated.10000001-20000000.b8192.c19.sav";
 
-  auto start = std::chrono::steady_clock::now();
   savvy::reader geno_file(args.geno_path());
   if (!geno_file)
     return std::cerr << "Could not open geno file\n", EXIT_FAILURE;
@@ -885,108 +981,22 @@ int main(int argc, char** argv)
   if (!load_phenotypes(args, geno_file, xresp, xcov))
     return std::cerr << "Could not load phenotypes\n", EXIT_FAILURE;
 
+//  residuals_type res = args.logit_enabled() ? compute_residuals_logit(xresp, xcov) : compute_residuals(xresp, xcov);
+//  std::cerr << res << std::endl;
+//  std::vector<scalar_type> res_std(res.begin(), res.end());
+//  scalar_type res_sum = std::accumulate(res_std.begin(), res_std.end(), scalar_type());
+//  scalar_type rss = std::inner_product(res_std.begin(), res_std.end(), res_std.begin(), scalar_type());
 
-
-//  auto xresp_data = xt::adapt(response_data, {response_data.size()});
-//  auto xcov_data = xt::adapt(covariate_data, {std::size_t(covariate_data.size() / 2), std::size_t(2)});
-  //residuals_type res = compute_residuals(xt::adapt(response_data, {response_data.size()}), xt::adapt(covariate_data, {std::size_t(covariate_data.size() / 2), std::size_t(cov_fields.size())}));
-  residuals_type res = args.logit_enabled() ? compute_residuals_logit(xresp, xcov) : compute_residuals(xresp, xcov);
-  std::cerr << res << std::endl;
-  std::vector<scalar_type> res_std(res.begin(), res.end());
-  scalar_type res_sum = std::accumulate(res_std.begin(), res_std.end(), scalar_type());
-  scalar_type rss = std::inner_product(res_std.begin(), res_std.end(), res_std.begin(), scalar_type());
-
-  //std::size_t n_samples = geno_file.samples().size();
-
-  std::ofstream output_file(args.output_path(), std::ios::binary);
-
-  output_file <<  "chrom\tpos\tmaf\tmac\tbeta\tse\tt\tpval\n";
-
-  savvy::variant var;
-  savvy::compressed_vector<scalar_type> sparse_geno;
-  std::vector<scalar_type> dense_geno;
-  while (geno_file >> var)
+  if (args.logit_enabled())
   {
-    std::size_t ploidy = 0;
-    bool is_sparse = false;
-    bool found = false;
-    for (const auto& f : var.format_fields())
-    {
-      if (f.first == format_field)
-      {
-        found = true;
-        is_sparse = args.force_sparse() || (!args.sparse_disabled() && f.second.is_sparse());
-        is_sparse ? f.second.get(sparse_geno) : f.second.get(dense_geno);
-        ploidy = is_sparse ? sparse_geno.size() / res_std.size() : dense_geno.size() / res_std.size();
-        is_sparse ? savvy::stride_reduce(sparse_geno, ploidy) : savvy::stride_reduce(dense_geno, ploidy);
-        break;
-      }
-    }
-
-    if (!found)
-    {
-      std::cerr << "Warning: skipping variant with not GT field\n";
-      continue;
-    }
-
-    assert(ploidy != 0);
-
-    float ac = 0.f, af = 0.f;
-    std::int64_t an = 0;
-    // For now, we are pulling from INFO fields but will likely always compute AC (along with case/ctrl AC) in the future.
-    if (var.get_info("AC", ac) && var.get_info("AN", an) && an > 0)
-    {
-      af = float(ac) / an;
-    }
-    else if (!var.get_info("AF", af))
-    {
-      // For computing ac and af we use AN of sample subset.
-      an = (res_std.size() * ploidy);
-      ac = is_sparse ? std::accumulate(sparse_geno.begin(), sparse_geno.end(), 0.f) : std::accumulate(dense_geno.begin(), dense_geno.end(), 0.f);
-      af = ac / an;
-    }
-    else
-    {
-      an = (geno_file.samples().size() * ploidy);
-      ac = af * an;
-    }
-
-    float mac = (ac > (an/2) ? an - ac : ac);
-    float maf = (af > 0.5 ? 1.f - af : af);
-
-    if (mac < args.min_mac()) continue;
-
-#if 0
-    if (is_sparse)
-    {
-      float beta, se, t, pval;
-      std::tie(beta, se, t, pval) = linreg_ttest(res_std, sparse_geno, res_sum);
-      //std::tie(beta, se, t, pval) = linreg_ttest_fast(res_std, sparse_geno, res_sum);
-
-      dense_geno.clear();
-      dense_geno.resize(sparse_geno.size());
-      for (auto it = sparse_geno.begin(); it != sparse_geno.end(); ++it)
-        dense_geno[it.offset()] = *it;
-      std::tie(beta, se, t, pval) = linreg_ttest(res_std, dense_geno, res_sum);
-      auto a = 0;
-    }
-#endif
-
-    float beta, se, t, pval;
-    std::tie(beta, se, t, pval) = is_sparse ? linreg_ttest(res_std, sparse_geno, res_sum, rss) : linreg_ttest(res_std, dense_geno, res_sum);
-    output_file << var.chromosome()
-        << "\t" << var.position()
-        << "\t" << maf
-        << "\t" << mac
-        << "\t" << beta
-        << "\t" << se
-        << "\t" << t
-        << "\t" << pval << "\n";
+    logistic_score_model mdl(xresp, xcov);
+    return run_single(args, geno_file, format_field, mdl);
   }
-  std::size_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
-  std::cerr << "Analysis time (ms): " << elapsed_ms << std::endl;
+  else
+  {
+    linear_model mdl(xresp, xcov);
+    return run_single(args, geno_file, format_field, mdl);
+  }
 
   // gzip -cd sp-reg-results-chr19-ldl.tsv | tail -n+2 | awk -F'\t' '$4>5  {print $2"\t"$8}' | gnuplot --persist -e "set logscale y; set yrange [0.99:5e-32] reverse; set xrange [1:65000000]; plot '-' using 1:2 w points"
-
-  return 0;
 }

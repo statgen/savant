@@ -1,0 +1,185 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
+#ifndef SAVANT_LINEAR_MODEL_HPP
+#define SAVANT_LINEAR_MODEL_HPP
+
+#include <savvy/compressed_vector.hpp>
+
+#include <xtensor.hpp>
+#include <xtensor-blas/xlinalg.hpp>
+#include <boost/math/distributions.hpp>
+
+#include <iostream>
+
+class linear_model
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  res_t residuals_;
+  scalar_type s_y_;
+  scalar_type s_yy_;
+public:
+  struct stats_t
+  {
+    scalar_type pvalue;
+    scalar_type beta;
+    scalar_type se;
+    scalar_type t;
+    scalar_type r2;
+  };
+
+  /*
+    ## calculate the weights for each observation
+    v <- exp(reml$linear.predictors) / (1 + exp(reml$linear.predictors))^2
+    vx <- v * reml$x
+    v2 <- t(vx) %*% reml$x
+    iv2 <- solve(v2)
+    iv2c <- chol(iv2) ## make t(iv2c) %*% iv2c = iv2
+    x.res <- pheno - reml$fitted  # n * 1 matrix
+    */
+
+
+  linear_model(const res_t& y, const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto pbetas = dot(dot(pinv(dot(transpose(x), x)), transpose(x)), y);
+
+    residuals_ = y - dot(x, pbetas);
+    s_y_ = sum(y)();
+    s_yy_ = dot(y, y)();
+  }
+
+  std::size_t sample_size() const { return residuals_.size(); }
+
+  template <typename GenoT>
+  stats_t test_single(const std::vector<GenoT>& x) const
+  {
+    const res_t& y = residuals_;
+
+    assert(y.size() == x.size());
+    const std::size_t n = x.size();
+    scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
+    scalar_type s_xx{}; //    = std::inner_product(x.begin(), x.end(), x.begin(), scalar_type());
+    scalar_type s_xy{}; //    = std::inner_product(x.begin(), x.end(), y.begin(), scalar_type());
+
+    for (std::size_t i = 0; i < n; ++i)
+    {
+      s_x += x[i];
+      s_xx += x[i] * x[i];
+      s_xy += x[i] * y[i];
+    }
+
+    const scalar_type m = (n * s_xy - s_x * s_y_) / (n * s_xx - s_x * s_x);
+    const scalar_type b = (s_y_ - m * s_x) / n;
+    auto fx             = [m,b](scalar_type x) { return m * x + b; };
+    const scalar_type x_mean  = s_x / n;
+
+    scalar_type se_line{};
+    scalar_type se_x_mean{};
+    for (std::size_t i = 0; i < n; ++i)
+    {
+      se_line += square(y[i] - fx(x[i]));
+      se_x_mean += square(x[i] - x_mean);
+    }
+
+    const scalar_type dof     = n - 2;
+    const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
+    scalar_type t = m / std_err;
+    scalar_type r = (n * s_xy - s_x * s_y_) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy_ - s_y_ * s_y_ ));
+
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r; //1 - se_line / se_y_mean;
+
+    return ret;
+  }
+
+  template <typename GenoT>
+  stats_t test_single(const savvy::compressed_vector<GenoT>& x) const
+  {
+    const res_t& y = residuals_;
+    assert(y.size() == x.size());
+    const std::size_t n = x.size();
+    scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
+    scalar_type s_xx{}; //    = std::inner_product(x.begin(), x.end(), x.begin(), scalar_type());
+    scalar_type s_xy{}; //    = x.dot(y, scalar_type());
+
+    const auto x_beg = x.begin();
+    const auto x_end = x.end();
+    for (auto it = x_beg; it != x_end; ++it)
+    {
+      s_x += *it;
+      s_xx += (*it) * (*it);
+      s_xy += (*it) * y[it.offset()];
+    }
+
+    //const float s_y     = std::accumulate(y.begin(), y.end(), 0.0f);
+    const scalar_type m       = (n * s_xy - s_x * s_y_) / (n * s_xx - s_x * s_x);
+    const scalar_type x_mean  = s_x / n;
+
+    scalar_type se_x_mean{};
+
+    for (auto it = x.begin(); it != x.end(); ++it)
+    {
+      se_x_mean += square(*it - x_mean);
+    }
+
+    se_x_mean += (square(0.0f - x_mean) * scalar_type(n - x.non_zero_size()));
+    scalar_type se2 = 1./(n*(n-2)) * (n*s_yy_ - s_y_*s_y_ - square(m)*(n*s_xx - square(s_x)));
+    scalar_type r = (n * s_xy - s_x * s_y_) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy_ - s_y_ * s_y_ ));
+
+    const scalar_type dof = n - 2;
+    const scalar_type std_err = std::sqrt(se2) / std::sqrt(se_x_mean);
+    scalar_type t = m / std_err;
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r;
+
+    return ret;
+  }
+private:
+  template <typename T>
+  static T square(const T& v) { return v * v; }
+};
+
+
+static std::ostream& operator<<(std::ostream& os, const linear_model& v)
+{
+  os << "pvalue\tbeta\tse\ttstat\tr2";
+  return os;
+}
+
+static std::ostream& operator<<(std::ostream& os, const typename linear_model::stats_t& v)
+{
+  os << v.pvalue
+    << "\t" << v.beta
+    << "\t" << v.se
+    << "\t" << v.t
+    << "\t" << v.r2;
+  return os;
+}
+
+
+#endif //SAVANT_LINEAR_MODEL_HPP
