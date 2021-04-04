@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+#include "plot.hpp"
 #include "tcdf.hpp"
 #include "logistic_score_model.hpp"
 #include "linear_model.hpp"
@@ -136,6 +137,29 @@ public:
   bool force_sparse() const { return always_sparse_; }
   bool logit_enabled() const { return logit_; }
   bool help_is_set() const { return help_; }
+
+  bool update_fmt_field(const savvy::reader& geno_file)
+  {
+    std::unordered_set<std::string> fmt_avail;
+
+    for (const auto& h : geno_file.format_headers())
+      fmt_avail.insert(h.id);
+
+    if (fmt_field_.empty())
+    {
+      if (fmt_avail.find("DS") != fmt_avail.end()) fmt_field_ = "DS";
+      else if (fmt_avail.find("HDS") != fmt_avail.end()) fmt_field_ = "HDS";
+      else if (fmt_avail.find("GT") != fmt_avail.end()) fmt_field_ = "GT";
+      else return std::cerr << "Error: file must contain DS, HDS, or GT format fields\n", false;
+      std::cerr << "Notice: --fmt-field not specified so auto selecting " << fmt_field_ << std::endl;
+    }
+    else
+    {
+      if (fmt_avail.find(fmt_field_) == fmt_avail.end())
+        return std::cerr << "Error: requested format field (" << fmt_field_ << ") not found in file headers\n", false;
+    }
+    return true;
+  }
 
   void print_usage(std::ostream& os)
   {
@@ -844,7 +868,7 @@ void challenger_test()
 }
 
 template <typename ModelT>
-int run_single(const prog_args& args, savvy::reader& geno_file, const std::string& format_field, const ModelT& mdl)
+int run_single(const prog_args& args, savvy::reader& geno_file, const ModelT& mdl)
 {
   auto start = std::chrono::steady_clock::now();
   std::ofstream output_file(args.output_path(), std::ios::binary);
@@ -861,7 +885,7 @@ int run_single(const prog_args& args, savvy::reader& geno_file, const std::strin
     bool found = false;
     for (const auto& f : var.format_fields())
     {
-      if (f.first == format_field)
+      if (f.first == args.fmt_field())
       {
         found = true;
         is_sparse = args.force_sparse() || (!args.sparse_disabled() && f.second.is_sparse());
@@ -927,6 +951,10 @@ int main(int argc, char** argv)
   //test();
   //slope_test();
   //return test_xtensor();
+
+  if (argc > 1 && std::string(argv[1]) == "plot-qq")
+    return plot_qq_main(argc, argv);
+
   prog_args args;
   if (!args.parse(argc, argv))
   {
@@ -955,26 +983,8 @@ int main(int argc, char** argv)
 
   geno_file.phasing_status(savvy::phasing::none);
 
-  std::string format_field = args.fmt_field();
-  std::unordered_set<std::string> fmt_avail;
-
-  for (const auto& h : geno_file.format_headers())
-    fmt_avail.insert(h.id);
-
-  if (format_field.empty())
-  {
-    if (fmt_avail.find("DS") != fmt_avail.end()) format_field = "DS";
-    else if (fmt_avail.find("HDS") != fmt_avail.end()) format_field = "HDS";
-    else if (fmt_avail.find("GT") != fmt_avail.end()) format_field = "GT";
-    else return std::cerr << "Error: file must contain DS, HDS, or GT format fields\n", EXIT_FAILURE;
-    std::cerr << "Notice: --fmt-field not specified so auto selecting " << format_field << std::endl;
-  }
-  else
-  {
-    if (fmt_avail.find(format_field) == fmt_avail.end())
-      return std::cerr << "Error: requested format field (" << format_field << ") not found in file headers\n", EXIT_FAILURE;
-  }
-
+  if (!args.update_fmt_field(geno_file))
+    return EXIT_FAILURE;
 
   xt::xtensor<scalar_type, 1> xresp;
   xt::xtensor<scalar_type, 2> xcov;
@@ -989,13 +999,11 @@ int main(int argc, char** argv)
 
   if (args.logit_enabled())
   {
-    logistic_score_model mdl(xresp, xcov);
-    return run_single(args, geno_file, format_field, mdl);
+    return run_single(args, geno_file, logistic_score_model(xresp, xcov));
   }
   else
   {
-    linear_model mdl(xresp, xcov);
-    return run_single(args, geno_file, format_field, mdl);
+    return run_single(args, geno_file, linear_model(xresp, xcov));
   }
 
   // gzip -cd sp-reg-results-chr19-ldl.tsv | tail -n+2 | awk -F'\t' '$4>5  {print $2"\t"$8}' | gnuplot --persist -e "set logscale y; set yrange [0.99:5e-32] reverse; set xrange [1:65000000]; plot '-' using 1:2 w points"
