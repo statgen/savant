@@ -100,6 +100,7 @@ private:
   bool no_sparse_ = false;
   bool always_sparse_ = false;
   bool logit_ = false;
+  bool trust_info_ = false;
   bool help_ = false;
 public:
   prog_args() :
@@ -118,6 +119,7 @@ public:
         {"output", required_argument, 0, 'o'},
         {"pheno", required_argument, 0, 'p'},
         {"region", required_argument, 0, 'r'},
+        {"trust-info", no_argument, 0, '\x01'},
         {0, 0, 0, 0}
       })
   {
@@ -136,6 +138,7 @@ public:
   bool sparse_disabled() const { return no_sparse_; }
   bool force_sparse() const { return always_sparse_; }
   bool logit_enabled() const { return logit_; }
+  bool trust_info() const { return trust_info_; }
   bool help_is_set() const { return help_; }
 
   bool update_fmt_field(const savvy::reader& geno_file)
@@ -177,6 +180,7 @@ public:
     os << "     --always-sparse  Forces sparse optimizations even for dense file records\n";
     os << "     --fmt-field      Format field to use (DS, HDS, or GT)\n";
     os << "     --debug-log      Enables debug logging and specifies log file\n";
+    os << "     --trust-info     Uses AC and AN INFO fields instead of computing values\n";
     os << std::flush;
   }
 
@@ -197,6 +201,10 @@ public:
         else if (std::string("always-sparse") == long_options_[long_index].name)
         {
           always_sparse_ = true;
+        }
+        else if (std::string("trust-info") == long_options_[long_index].name)
+        {
+          trust_info_ = true;
         }
         else
         {
@@ -908,22 +916,22 @@ int run_single(const prog_args& args, savvy::reader& geno_file, const ModelT& md
     float ac = 0.f, af = 0.f;
     std::int64_t an = 0;
     // For now, we are pulling from INFO fields but will likely always compute AC (along with case/ctrl AC) in the future.
-    if (var.get_info("AC", ac) && var.get_info("AN", an) && an > 0)
+    if (args.trust_info() && mdl.sample_size() == geno_file.samples().size() && var.get_info("AC", ac) && var.get_info("AN", an) && an > 0)
     {
       af = float(ac) / an;
     }
-    else if (!var.get_info("AF", af))
+    else //if (!var.get_info("AF", af))
     {
       // For computing ac and af we use AN of sample subset.
-      an = (mdl.sample_size() * ploidy);
+      an = mdl.sample_size() * ploidy;
       ac = is_sparse ? std::accumulate(sparse_geno.begin(), sparse_geno.end(), 0.f) : std::accumulate(dense_geno.begin(), dense_geno.end(), 0.f);
       af = ac / an;
     }
-    else
-    {
-      an = (geno_file.samples().size() * ploidy);
-      ac = af * an;
-    }
+    //else
+    //{
+    //  an = (geno_file.samples().size() * ploidy);
+    //  ac = af * an;
+    //}
 
     float mac = (ac > (an/2) ? an - ac : ac);
     float maf = (af > 0.5 ? 1.f - af : af);

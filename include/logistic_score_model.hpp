@@ -70,7 +70,7 @@ public:
       }
       xtensor<double, 2> I = dot(x_transpose_copy, x);
       beta = beta + dot(pinv(I), F);
-      //std::cerr << beta << std::endl;
+      debug_log << beta << std::endl;
     }
     // =================== //
 
@@ -88,6 +88,7 @@ public:
     // v <- exp(reml$linear.predictors) / (1 + exp(reml$linear.predictors))^2
     auto xw = dot(x, beta);
     v_ = xt::exp(xw) / xt::square(1. + xt::exp(xw));
+    debug_log << "v_: " << v_ << std::endl;
     debug_log << "shape: " << xt::adapt(v_.shape()) << std::endl;
     debug_log << "shape: " << xt::adapt(xw.shape()) << std::endl;
     debug_log << "shape: " << xt::adapt(x.shape()) << std::endl;
@@ -124,8 +125,6 @@ public:
     debug_log << "res: " << residuals_ << std::endl;
     debug_log << "vx_do_iv2ct: " << vx_dot_iv2ct_ << std::endl;
     // =================== //
-
-    debug_log.flush();
 
 //    T y_hat = 1. / (1. + xt::exp(-xw));
 //    residuals_type residuals = y - y_hat;
