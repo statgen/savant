@@ -172,7 +172,7 @@ public:
     //std::cerr << "Vr: " << Vr << std::endl;
 
     // V.s <- sqrt(Vl - rowSums(Vr*Vr) + 1e-10) ## to avoid negative variance estimate
-    auto Vs = xt::sqrt(Vl - xt::sum(Vr * Vr) + 1e-10);
+    auto Vs = xt::sqrt(Vl - xt::sum(Vr * Vr) + 1e-10); // TODO: use max(Vl - sum(Vr*Vr), 1e-10) instead
     //std::cerr << "Vs: " << Vs << std::endl;
 
     auto t_stat = U / Vs;
@@ -197,7 +197,39 @@ public:
 
   stats_t test_single(const savvy::compressed_vector<double>& geno_vec) const
   {
+    using namespace xt;
+    using namespace xt::linalg;
+
     stats_t ret;
+
+    //auto U = dot(residuals_, geno_vec);
+    //auto Vl = dot(v_, xt::square(geno_vec));
+    scalar_type U = 0.;
+    scalar_type Vl = 0.;
+    for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+    {
+      U += *it * residuals_[it.offset()];
+      Vl += *it * *it * v_[it.offset()];
+    }
+
+    //auto Vr = dot(geno_vec, vx_dot_iv2ct_);
+    assert(geno_vec.size() == vx_dot_iv2ct_.shape(0));
+    std::vector<scalar_type> Vr(vx_dot_iv2ct_.shape(1), 0.);
+    for (std::size_t i = 0; i < Vr.size(); ++i)
+    {
+      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+        Vr[i] += *it * vx_dot_iv2ct_(it.offset(), i);
+    }
+
+    //auto Vs = xt::sqrt(Vl - xt::sum(Vr * Vr) + 1e-10); // TODO: use max(Vl - sum(Vr*Vr), 1e-10) instead
+    scalar_type Vs = std::sqrt(Vl - std::inner_product(Vr.begin(), Vr.end(), Vr.begin(), 0.) + 1e-10);
+
+    //auto t_stat = U / Vs;
+    ret.score = U / Vs;
+
+    boost::math::normal_distribution<double> dist;
+    ret.pvalue =  cdf(complement(dist, std::fabs(std::isnan(ret.score) ? 0 : ret.score))) * 2;
+
     return ret;
   }
 };
