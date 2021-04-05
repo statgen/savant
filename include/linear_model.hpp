@@ -62,19 +62,19 @@ public:
   std::size_t sample_size() const { return residuals_.size(); }
 
   template <typename GenoT>
-  stats_t test_single(const std::vector<GenoT>& x) const
+  stats_t test_single(const std::vector<GenoT>& x, scalar_type s_x) const
   {
     const res_t& y = residuals_;
 
     assert(y.size() == x.size());
     const std::size_t n = x.size();
-    scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
+    //scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
     scalar_type s_xx{}; //    = std::inner_product(x.begin(), x.end(), x.begin(), scalar_type());
     scalar_type s_xy{}; //    = std::inner_product(x.begin(), x.end(), y.begin(), scalar_type());
 
     for (std::size_t i = 0; i < n; ++i)
     {
-      s_x += x[i];
+      //s_x += x[i];
       s_xx += x[i] * x[i];
       s_xy += x[i] * y[i];
     }
@@ -111,12 +111,12 @@ public:
   }
 
   template <typename GenoT>
-  stats_t test_single(const savvy::compressed_vector<GenoT>& x) const
+  stats_t test_single(const savvy::compressed_vector<GenoT>& x, scalar_type s_x) const
   {
     const res_t& y = residuals_;
     assert(y.size() == x.size());
     const std::size_t n = x.size();
-    scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
+    //scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
     scalar_type s_xx{}; //    = std::inner_product(x.begin(), x.end(), x.begin(), scalar_type());
     scalar_type s_xy{}; //    = x.dot(y, scalar_type());
 
@@ -124,7 +124,7 @@ public:
     const auto x_end = x.end();
     for (auto it = x_beg; it != x_end; ++it)
     {
-      s_x += *it;
+      //s_x += *it;
       s_xx += (*it) * (*it);
       s_xy += (*it) * y[it.offset()];
     }

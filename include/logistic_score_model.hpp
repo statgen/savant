@@ -137,7 +137,7 @@ public:
   std::size_t sample_size() const { return residuals_.size(); }
 
   template <typename GenoVecT>
-  stats_t test_single(const GenoVecT& geno_vec) const
+  stats_t test_single(const GenoVecT& geno_vec, scalar_type /*allele_count*/) const
   {
     using namespace xt;
     using namespace xt::linalg;
@@ -190,12 +190,12 @@ public:
     return ret;
   }
 
-  stats_t test_single(const std::vector<double>& dense_geno) const
+  stats_t test_single(const std::vector<double>& dense_geno, scalar_type allele_count) const
   {
-    return test_single(xt::adapt(dense_geno));
+    return test_single(xt::adapt(dense_geno), allele_count);
   }
 
-  stats_t test_single(const savvy::compressed_vector<double>& geno_vec) const
+  stats_t test_single(const savvy::compressed_vector<double>& geno_vec, scalar_type /*allele_count*/) const
   {
     using namespace xt;
     using namespace xt::linalg;
