@@ -875,6 +875,89 @@ void challenger_test()
   auto a = 0;
 }
 
+template <typename T>
+auto power_iteration(const T& X, xt::xarray<double> r, std::size_t n_simulations = 8)
+{
+  xt::xarray<double> b_k = r; //xt::random::rand<double>({X.shape(1)});
+  std::cerr << b_k << std::endl;
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    // calculate the matrix-by-vector product Ab
+    auto b_k1 = xt::linalg::dot(X, b_k);
+    std::cerr << "b_k1: " << b_k1 << std::endl;
+
+    // calculate the norm
+    auto b_k1_norm = xt::linalg::norm(b_k1);
+    std::cerr << "b_k1_norm: " << b_k1_norm << std::endl;
+
+    // re normalize the vector
+    b_k = b_k1 / b_k1_norm;
+    std::cerr << b_k << std::endl;
+  }
+
+  return b_k;
+}
+
+template <typename T>
+auto power_iteration_matrix_free(const T& X, xt::xarray<double> r, std::size_t n_simulations = 8)
+{
+  //xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
+  std::cerr << "r: " << r << std::endl;
+  //r = r / xt::linalg::norm(r);
+  //std::cerr << r << std::endl;
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    xt::xtensor<double, 1> s = xt::zeros<double>(r.shape());
+    std::cerr << s << std::endl;
+
+    for (std::size_t j = 0; j < X.shape(0); ++j)
+    {
+      auto x = xt::row(X, j);
+      s = s + xt::linalg::dot(x, r) * x;
+      std::cerr << s << std::endl;
+    }
+
+    auto eigenvalue = xt::linalg::dot(xt::transpose(r), s);
+    std::cerr << eigenvalue << std::endl;
+
+    auto err = xt::linalg::norm(eigenvalue * r - s);
+    std::cerr << "err: " << err << std::endl;
+
+    r = s / xt::linalg::norm(s);
+    std::cerr << "r: " << r << std::endl;
+  }
+
+  return r;
+}
+
+#include <xtensor/xrandom.hpp>
+int pca_test()
+{
+  xt::xtensor<double, 2> X = {{ 3.7,  -7.833333,     -9.5, -11.383333},
+                              { 0.5,  19.166667,    -19.5,  11.916667},
+                              {-1.4,  50.166667,     12.5,  -1.583333},
+                              {-0.7, -53.833333,    -17.5, -13.083333},
+                              {-0.5,  32.166667,     23.5,   8.016667},
+                              {-1.6, -39.833333,     10.5,   6.116}};
+
+
+
+  //xt::xarray<double> evals, evecs;
+  auto [evals, evecs] = xt::linalg::eig(xt::linalg::dot(xt::transpose(X), X));
+  std::cerr << evals << std::endl;
+  std::cerr << evecs << std::endl;
+
+
+  xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
+  auto p1 = power_iteration(xt::linalg::dot(xt::transpose(X), X), r);
+
+  auto p2 = power_iteration_matrix_free(X, r);
+
+  return 0;
+}
+
 template <typename ModelT>
 int run_single(const prog_args& args, savvy::reader& geno_file, const ModelT& mdl)
 {
@@ -955,6 +1038,7 @@ int run_single(const prog_args& args, savvy::reader& geno_file, const ModelT& md
 
 int main(int argc, char** argv)
 {
+  //return pca_test();
   //challenger_test();
   //test();
   //slope_test();
