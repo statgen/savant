@@ -876,65 +876,75 @@ void challenger_test()
 }
 
 template <typename T>
-auto power_iteration(const T& X, xt::xarray<double> r, std::size_t n_simulations = 8)
+auto power_iteration(const T& X, std::size_t n_simulations = 8)
 {
-  xt::xarray<double> b_k = r; //xt::random::rand<double>({X.shape(1)});
-  std::cerr << b_k << std::endl;
+  double eigval;
+  xt::xarray<double> b_k = xt::ones<double>({X.shape(1)}) / std::sqrt(X.shape(1));
+  //xt::xarray<double> b_k = xt::random::rand<double>({X.shape(1)});
+  //std::cerr << b_k << std::endl;
 
   for (std::size_t i = 0; i < n_simulations; ++i)
   {
     // calculate the matrix-by-vector product Ab
     auto b_k1 = xt::linalg::dot(X, b_k);
-    std::cerr << "b_k1: " << b_k1 << std::endl;
+    //std::cerr << "b_k1: " << b_k1 << std::endl;
 
     // calculate the norm
     auto b_k1_norm = xt::linalg::norm(b_k1);
-    std::cerr << "b_k1_norm: " << b_k1_norm << std::endl;
+    //std::cerr << "b_k1_norm: " << b_k1_norm << std::endl;
 
     // re normalize the vector
     b_k = b_k1 / b_k1_norm;
-    std::cerr << b_k << std::endl;
+    //std::cerr << b_k << std::endl;
+
+    auto tmp = xt::linalg::dot(b_k, xt::linalg::dot(X, b_k));
+    //std::cerr << "eigval: " << tmp << std::endl;
+    eigval = tmp();
   }
 
-  return b_k;
+  return std::make_tuple(eigval, b_k);
 }
 
 template <typename T>
-auto power_iteration_matrix_free(const T& X, xt::xarray<double> r, std::size_t n_simulations = 8)
+auto power_iteration_matrix_free(const T& X, std::size_t n_simulations = 8)
 {
+  double eigenvalue = 0.;
+  xt::xarray<double> r = xt::ones<double>({X.shape(1)}) / std::sqrt(X.shape(1));
   //xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
-  std::cerr << "r: " << r << std::endl;
   //r = r / xt::linalg::norm(r);
   //std::cerr << r << std::endl;
 
   for (std::size_t i = 0; i < n_simulations; ++i)
   {
     xt::xtensor<double, 1> s = xt::zeros<double>(r.shape());
-    std::cerr << s << std::endl;
+    //std::cerr << s << std::endl;
 
     for (std::size_t j = 0; j < X.shape(0); ++j)
     {
       auto x = xt::row(X, j);
-      s = s + xt::linalg::dot(x, r) * x;
-      std::cerr << s << std::endl;
+      s += xt::linalg::dot(x, r) * x;
+      //std::cerr << s << std::endl;
     }
 
-    auto eigenvalue = xt::linalg::dot(xt::transpose(r), s);
-    std::cerr << eigenvalue << std::endl;
+    eigenvalue = xt::linalg::dot(xt::transpose(r), s)();
+    //std::cerr << eigenvalue << std::endl;
 
     auto err = xt::linalg::norm(eigenvalue * r - s);
-    std::cerr << "err: " << err << std::endl;
+    //std::cerr << "err: " << err << std::endl;
 
     r = s / xt::linalg::norm(s);
-    std::cerr << "r: " << r << std::endl;
+    //std::cerr << "r: " << r << std::endl;
   }
 
-  return r;
+  return std::make_tuple(eigenvalue, r);
 }
 
 #include <xtensor/xrandom.hpp>
 int pca_test()
 {
+  using namespace xt;
+  using namespace xt::linalg;
+
   xt::xtensor<double, 2> X = {{ 3.7,  -7.833333,     -9.5, -11.383333},
                               { 0.5,  19.166667,    -19.5,  11.916667},
                               {-1.4,  50.166667,     12.5,  -1.583333},
@@ -951,10 +961,41 @@ int pca_test()
 
 
   xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
-  auto p1 = power_iteration(xt::linalg::dot(xt::transpose(X), X), r);
 
-  auto p2 = power_iteration_matrix_free(X, r);
+  auto xcov = xt::linalg::dot(xt::transpose(X), X);
 
+  auto P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
+  double eval;
+  xt::xarray<double> evec;
+  for (std::size_t i = 0; i < X.shape(1); ++i)
+  {
+    std::tie(eval, evec) = power_iteration(xcov);
+    evec.reshape({evec.size(), 1});
+    P = xt::concatenate(xt::xtuple(P, evec), 1);
+    xcov -= eval * xt::linalg::dot(evec, xt::transpose(evec));
+  }
+  std::cerr << P << std::endl;
+
+  P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
+  xt::xtensor<double, 2> A = X;
+  for (std::size_t i = 0; i < A.shape(1); ++i)
+  {
+    std::tie(eval, evec) = power_iteration_matrix_free(A);
+    evec.reshape({evec.size(), 1});
+    P = xt::concatenate(xt::xtuple(P, evec), 1);
+
+//    auto score_vec = xt::xtensor<double, 1>::from_shape({A.shape(0)});
+//    for (std::size_t j = 0; j < A.shape(0); ++j)
+//    {
+//      score_vec[j] = dot(xt::row(A, j), evec)();
+//    }
+
+    for (std::size_t j = 0; j < A.shape(0); ++j)
+    {
+      xt::row(A, j) -= row(dot(xt::row(A, j), evec)() * transpose(evec), 0);
+    }
+  }
+  std::cerr << P << std::endl;
   return 0;
 }
 
