@@ -30,6 +30,7 @@
 #include <random>
 #include <chrono>
 #include <getopt.h>
+#include <tuple>
 
 std::ofstream debug_log;
 
@@ -876,6 +877,102 @@ void challenger_test()
 }
 
 template <typename T>
+auto simultaneous_power_iteration(const T& X, std::size_t num_pcs = 0, std::size_t n_simulations = 8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  if (num_pcs == 0)
+    num_pcs = X.shape(1);
+
+  xarray<double> Q = random::rand<double>({X.shape(1), num_pcs});
+  xarray<double> R;
+  std::cerr << "Q: " << Q << std::endl;
+  std::cerr << "R: " << R << std::endl;
+  std::tie(Q, R) = qr(Q);
+  auto Q_prev = Q;
+
+  std::cerr << "Q: " << Q << std::endl;
+  std::cerr << "R: " << R << std::endl;
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    auto Z = dot(X, Q);
+    std::tie(Q, R) = qr(Z);
+
+    auto delta = Q - Q_prev;
+    auto err = sum(delta * delta);
+    std::cerr << "err: " << err << std::endl;
+    Q_prev = Q;
+  }
+
+  std::cerr << "Q: " << Q << std::endl;
+  std::cerr << "R: " << R << std::endl;
+
+  return std::make_tuple(xt::eval(xt::diag(R)), Q);
+}
+
+template <typename T>
+auto simultaneous_power_iteration_matrix_free(const T& X, std::size_t num_pcs = 0, std::size_t n_simulations = 8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  if (num_pcs == 0)
+    num_pcs = X.shape(1);
+
+  xarray<double> Q = random::rand<double>({X.shape(1), num_pcs});
+  xarray<double> R;
+  std::cerr << "Q: " << Q << std::endl;
+  std::cerr << "R: " << R << std::endl;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev = Q;
+  std::cerr << "Q: " << Q << std::endl;
+  std::cerr << "R: " << R << std::endl;
+  //xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
+  //r = r / xt::linalg::norm(r);
+  //std::cerr << r << std::endl;
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    xarray<double> S = xt::zeros<double>(Q.shape());
+    //std::cerr << S << std::endl;
+
+    for (std::size_t j = 0; j < X.shape(0); ++j)
+    {
+      auto x = xt::row(X, j);
+      //std::cerr << "x: " << x << std::endl;
+      //std::cerr << "transpose(x): " << transpose(x) << std::endl;
+      //std::cerr << "xt::reshape_view(x, {x.size(), 1}): " << xt::reshape_view(x, {x.size(), std::size_t(1)}) << std::endl;
+      //std::cerr << "dot(x, Q): " << dot(x, Q) << std::endl;
+      //std::cerr << "xt::reshape_view(dot(x, Q), {std::size_t(1), x.size()}): " << xt::reshape_view(dot(x, Q), {std::size_t(1), x.size()}) << std::endl;
+      //std::cerr << "dot(transpose(x), dot(x, Q)): " << dot(xt::reshape_view(x, {x.size(), std::size_t(1)}), xt::reshape_view(dot(x, Q), {std::size_t(1), x.size()})) << std::endl;
+      S += dot(xt::reshape_view(x, {x.size(), std::size_t(1)}), xt::reshape_view(dot(x, Q), {std::size_t(1), x.size()}));
+      //std::cerr << s << std::endl;
+    }
+    //std::cerr << S << std::endl;
+
+    //eigenvalue = xt::linalg::dot(xt::transpose(r), s)();
+    //std::cerr << eigenvalue << std::endl;
+    std::tie(Q, R) = qr(S);
+
+    //auto err = xt::linalg::norm(eigenvalue * r - s);
+    auto delta = Q - Q_prev;
+    auto err = sum(delta * delta);
+    std::cerr << "err: " << err << std::endl;
+    //std::cerr << "err: " << err << std::endl;
+
+    Q_prev = Q;
+    //std::cerr << "r: " << r << std::endl;
+  }
+
+  std::cerr << "diag(R): " << diag(R) << std::endl;
+  std::cerr << "Q: " << Q << std::endl;
+
+  return std::make_tuple(diag(R), Q);
+}
+
+template <typename T>
 auto power_iteration(const T& X, std::size_t n_simulations = 8)
 {
   double eigval;
@@ -963,6 +1060,9 @@ int pca_test()
   xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
 
   auto xcov = xt::linalg::dot(xt::transpose(X), X);
+
+  auto discard = simultaneous_power_iteration(xcov);
+  auto discard2 = simultaneous_power_iteration_matrix_free(X);
 
   auto P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
   double eval;
