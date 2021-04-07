@@ -887,13 +887,13 @@ auto simultaneous_power_iteration(const T& X, std::size_t num_pcs = 0, std::size
 
   xarray<double> Q = random::rand<double>({X.shape(1), num_pcs});
   xarray<double> R;
-  std::cerr << "Q: " << Q << std::endl;
-  std::cerr << "R: " << R << std::endl;
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
   std::tie(Q, R) = qr(Q);
   auto Q_prev = Q;
 
-  std::cerr << "Q: " << Q << std::endl;
-  std::cerr << "R: " << R << std::endl;
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
 
   for (std::size_t i = 0; i < n_simulations; ++i)
   {
@@ -909,7 +909,7 @@ auto simultaneous_power_iteration(const T& X, std::size_t num_pcs = 0, std::size
   std::cerr << "Q: " << Q << std::endl;
   std::cerr << "R: " << R << std::endl;
 
-  return std::make_tuple(xt::eval(xt::diag(R)), Q);
+  return std::make_tuple(xt::eval(xt::diagonal(R)), Q);
 }
 
 template <typename T>
@@ -923,12 +923,12 @@ auto simultaneous_power_iteration_matrix_free(const T& X, std::size_t num_pcs = 
 
   xarray<double> Q = random::rand<double>({X.shape(1), num_pcs});
   xarray<double> R;
-  std::cerr << "Q: " << Q << std::endl;
-  std::cerr << "R: " << R << std::endl;
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
   std::tie(Q, R) = qr(Q);
   xarray<double> Q_prev = Q;
-  std::cerr << "Q: " << Q << std::endl;
-  std::cerr << "R: " << R << std::endl;
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
   //xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
   //r = r / xt::linalg::norm(r);
   //std::cerr << r << std::endl;
@@ -966,10 +966,11 @@ auto simultaneous_power_iteration_matrix_free(const T& X, std::size_t num_pcs = 
     //std::cerr << "r: " << r << std::endl;
   }
 
-  std::cerr << "diag(R): " << diag(R) << std::endl;
+  std::cerr << "R: " << R << std::endl;
+  std::cerr << "diag(R): " << diagonal(R) << std::endl;
   std::cerr << "Q: " << Q << std::endl;
 
-  return std::make_tuple(diag(R), Q);
+  return std::make_tuple(eval(diagonal(R)), Q);
 }
 
 template <typename T>
@@ -1062,7 +1063,9 @@ int pca_test()
   auto xcov = xt::linalg::dot(xt::transpose(X), X);
 
   auto discard = simultaneous_power_iteration(xcov);
+  std::cerr << "ev: " << std::get<0>(discard) << std::endl;
   auto discard2 = simultaneous_power_iteration_matrix_free(X);
+  std::cerr << "ev: " << std::get<0>(discard) << std::endl;
 
   auto P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
   double eval;
