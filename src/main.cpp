@@ -5,6 +5,7 @@
  */
 
 #include "plot.hpp"
+#include "pca.hpp"
 #include "tcdf.hpp"
 #include "logistic_score_model.hpp"
 #include "linear_model.hpp"
@@ -1190,6 +1191,8 @@ int main(int argc, char** argv)
 
   if (argc > 1 && std::string(argv[1]) == "plot-qq")
     return plot_qq_main(argc, argv);
+  else if (argc > 1 && std::string(argv[1]) == "pca")
+    return pca_main(argc, argv);
 
   prog_args args;
   if (!args.parse(argc, argv))
