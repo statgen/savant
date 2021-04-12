@@ -20,6 +20,7 @@
 #include <xtensor/xarray.hpp>
 #include <xtensor/xview.hpp>
 #include <xtensor/xadapt.hpp>
+#include <xtensor/xrandom.hpp>
 #include <xtensor-blas/xlinalg.hpp>
 
 #include <utility>
@@ -1038,7 +1039,83 @@ auto power_iteration_matrix_free(const T& X, std::size_t n_simulations = 8)
   return std::make_tuple(eigenvalue, r);
 }
 
-#include <xtensor/xrandom.hpp>
+template <typename T>
+auto nipals(const T& X, std::size_t n_simulations = 8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  double eigenvalue = 0.;
+  xt::xarray<double> t = xt::ones<double>({X.shape(0)}) / std::sqrt(X.shape(0));
+  xt::xarray<double> r = xt::ones<double>({X.shape(1)}) / std::sqrt(X.shape(1));
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    t = dot(X, r);
+    auto s = dot(transpose(X), t);
+    //std::cerr << "s: " << s << std::endl;
+
+    eigenvalue = xt::linalg::dot(xt::transpose(r), s)();
+    //std::cerr << eigenvalue << std::endl;
+
+    auto err = xt::linalg::norm(eigenvalue * r - s);
+    //std::cerr << "err: " << err << std::endl;
+
+    r = s / xt::linalg::norm(s);
+    //std::cerr << "r: " << r << std::endl;
+  }
+
+  return std::make_tuple(eigenvalue, r);
+}
+
+template <typename MatT>
+auto simultaneous_nipals(const MatT& X, std::size_t num_pcs = 0, std::size_t n_simulations = 8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  if (num_pcs == 0)
+    num_pcs = X.shape(1);
+
+  xarray<double> Q = random::rand<double>({X.shape(1), num_pcs});
+  xarray<double> R;
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev = Q;
+  xarray<double> T = xarray<double>::from_shape({X.shape(0), num_pcs});
+//  std::cerr << "Q: " << Q << std::endl;
+//  std::cerr << "R: " << R << std::endl;
+
+  for (std::size_t i = 0; i < n_simulations; ++i)
+  {
+    T = dot(X, Q);
+    auto S = dot(transpose(X), T);
+    //std::cerr << S << std::endl;
+
+
+    //eigenvalue = xt::linalg::dot(xt::transpose(r), s)();
+    //std::cerr << eigenvalue << std::endl;
+    std::tie(Q, R) = qr(S);
+
+    //auto err = xt::linalg::norm(eigenvalue * r - s);
+    auto delta = Q - Q_prev;
+    auto err = sum(delta * delta);
+    std::cerr << "err: " << err << std::endl;
+    //std::cerr << "err: " << err << std::endl;
+
+    Q_prev = Q;
+    //std::cerr << "r: " << r << std::endl;
+  }
+
+  std::cerr << "R: " << R << std::endl;
+  std::cerr << "diag(R): " << diagonal(R) << std::endl;
+  std::cerr << "Q: " << Q << std::endl;
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+
 int pca_test()
 {
   using namespace xt;
@@ -1066,11 +1143,36 @@ int pca_test()
   auto discard = simultaneous_power_iteration(xcov);
   std::cerr << "ev: " << std::get<0>(discard) << std::endl;
   auto discard2 = simultaneous_power_iteration_matrix_free(X);
-  std::cerr << "ev: " << std::get<0>(discard) << std::endl;
+  std::cerr << "ev: " << std::get<0>(discard2) << std::endl;
+  auto discard3 = simultaneous_nipals(X);
+  std::cerr << "ev: " << std::get<0>(discard3) << std::endl;
 
   auto P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
   double eval;
   xt::xarray<double> evec;
+
+  xt::xtensor<double, 2> A0 = X;
+  for (std::size_t i = 0; i < A0.shape(1); ++i)
+  {
+    std::tie(eval, evec) = nipals(A0);
+    std::cerr << "eval: " << eval << std::endl;
+    evec.reshape({evec.size(), 1});
+    P = xt::concatenate(xt::xtuple(P, evec), 1);
+
+//    auto score_vec = xt::xtensor<double, 1>::from_shape({A.shape(0)});
+//    for (std::size_t j = 0; j < A.shape(0); ++j)
+//    {
+//      score_vec[j] = dot(xt::row(A, j), evec)();
+//    }
+
+    for (std::size_t j = 0; j < A0.shape(0); ++j)
+    {
+      xt::row(A0, j) -= row(dot(xt::row(A0, j), evec)() * transpose(evec), 0);
+    }
+  }
+  std::cerr << P << std::endl;
+
+  P = xt::xtensor<double, 2>::from_shape({X.shape(1), 0});
   for (std::size_t i = 0; i < X.shape(1); ++i)
   {
     std::tie(eval, evec) = power_iteration(xcov);
