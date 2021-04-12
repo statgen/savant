@@ -12,6 +12,110 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <getopt.h>
+
+class pca_prog_args
+{
+private:
+  std::vector<option> long_options_;
+  std::string input_path_;
+  std::string output_path_ = "/dev/stdout";
+  double tolerance_ = 1e-8;
+  std::size_t max_iterations_ = 128;
+  std::int8_t use_cov_mat_ = -1;
+  std::size_t num_pcs_ = 10;
+  bool help_ = false;
+public:
+  pca_prog_args() :
+    long_options_(
+      {
+        {"cov-mat", required_argument, 0, 'c'},
+        {"help", no_argument, 0, 'h'},
+        {"iterations", required_argument, 0, 'i'},
+        {"output", required_argument, 0, 'o'},
+        {"pcs", required_argument, 0, 'p'},
+        {"tolerance", required_argument, 0, 'e'},
+        {0, 0, 0, 0}
+      })
+  {
+  }
+
+  const std::string& input_path() const { return input_path_; }
+  const std::string& output_path() const { return output_path_; }
+
+  double tolerance() const { return tolerance_; }
+  std::size_t max_iterations() const { return max_iterations_; }
+  std::size_t num_pcs() const { return num_pcs_; }
+  std::int8_t use_cov_mat() const { return use_cov_mat_; }
+  bool help_is_set() const { return help_; }
+
+  void print_usage(std::ostream& os)
+  {
+    os << "Usage: savant pca [opts ...] <in.sav> \n";
+    os << "\n";
+    os << " -c, --cov-mat     Explicitly set whether to compute covariance matrix (0 or 1; default: auto)\n";
+    os << " -e, --tolerance   Tolerance used for convergence (default: 1e-8)\n";
+    os << " -h, --help        Print usage\n";
+    os << " -i, --iterations  Maximum number of iterations (default: 128)\n";
+    os << " -o, --output      Output path (default: appends index to SAV file)\n";
+    os << " -p, --pcs         Number of PCs to generate (default: 10)\n";
+    //os << " -t, --threads     Number of threads to use (default: 1)\n";
+
+    os << std::flush;
+  }
+
+  bool parse(int argc, char** argv)
+  {
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, "c:e:hi:o:p:", long_options_.data(), &long_index )) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case 'c':
+        use_cov_mat_ = std::atoi(optarg ? optarg : "");
+        break;
+      case 'e':
+        tolerance_ = std::atof(optarg ? optarg : "");
+        break;
+      case 'h':
+        help_ = true;
+        return true;
+      case 'i':
+        max_iterations_ = std::atoi(optarg ? optarg : "");
+        break;
+      case 'o':
+        output_path_ = optarg ? optarg : "";
+        break;
+      case 'p':
+        num_pcs_ = std::atoi(optarg ? optarg : "");
+        break;
+      default:
+        return false;
+      }
+    }
+
+    int remaining_arg_count = argc - optind;
+
+    if (remaining_arg_count == 1)
+    {
+      input_path_ = argv[optind];
+    }
+    else if (remaining_arg_count < 1)
+    {
+      std::cerr << "Too few arguments\n";
+      return false;
+    }
+    else
+    {
+      std::cerr << "Too many arguments\n";
+      return false;
+    }
+
+    return true;
+  }
+};
 
 template <typename T>
 auto compute_cov_mat_eigen(const T& X, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
@@ -247,14 +351,22 @@ bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno)
 
 int pca_main(int argc, char** argv)
 {
-  if (argc < 3)
-    return std::cerr << "Error: missing argument (path to results file)\n", EXIT_FAILURE;
+  pca_prog_args args;
+  if (!args.parse(argc, argv))
+  {
+    args.print_usage(std::cerr);
+    return EXIT_FAILURE;
+  }
 
-  std::string geno_file_path = argv[2];
+  if (args.help_is_set())
+  {
+    args.print_usage(std::cout);
+    return EXIT_SUCCESS;
+  }
 
-  savvy::reader geno_file(geno_file_path);
+  savvy::reader geno_file(args.input_path());
   if (!geno_file)
-    return std::cerr << "Error: could not open genotype file ("<< geno_file_path << ")\n", EXIT_FAILURE;
+    return std::cerr << "Error: could not open genotype file ("<< args.input_path() << ")\n", EXIT_FAILURE;
 
   xt::xtensor<double, 2> xgeno;
   if (!load_geno_matrix(geno_file, xgeno))
@@ -265,11 +377,19 @@ int pca_main(int argc, char** argv)
 
   std::size_t m = xgeno.shape(0), n = xgeno.shape(1);
   std::cerr << "Loaded " << m << " variants from " << n << " samples" << std::endl;
+
+  bool use_cov_mat = args.use_cov_mat() < 0 ? nipals_complexity(m, n) > cov_complexity(m, n) : (bool)args.use_cov_mat();
+
+  if (use_cov_mat)
+    std::cerr << "Using covariance matrix" << std::endl;
+  else
+    std::cerr << "Not using covariance matrix" << std::endl;
+
   xt::xarray<double> eigvals, eigvecs;
-  std::tie(eigvals, eigvecs) = nipals_complexity(m, n) < cov_complexity(m, n) ?
-    nipals_dense(xgeno, 10)
+  std::tie(eigvals, eigvecs) = use_cov_mat ?
+    nipals_dense(xgeno, args.num_pcs(), args.max_iterations(), args.tolerance())
     :
-    compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), 10);
+    compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), args.num_pcs(), args.max_iterations(), args.tolerance());
   std::cerr << "evals: " << eigvals << std::endl;
   //std::cerr << "evecs: " << eigvecs << std::endl;
 

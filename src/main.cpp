@@ -1295,7 +1295,7 @@ int main(int argc, char** argv)
   if (argc > 1 && std::string(argv[1]) == "plot-qq")
     return plot_qq_main(argc, argv);
   else if (argc > 1 && std::string(argv[1]) == "pca")
-    return pca_main(argc, argv);
+    return pca_main(argc - 1, ++argv);
 
   prog_args args;
   if (!args.parse(argc, argv))
