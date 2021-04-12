@@ -33,6 +33,7 @@
 #include <chrono>
 #include <getopt.h>
 #include <tuple>
+#include <complex>
 
 std::ofstream debug_log;
 
@@ -1130,12 +1131,12 @@ int pca_test()
 
 
 
-  //xt::xarray<double> evals, evecs;
-  auto [evals, evecs] = xt::linalg::eig(xt::linalg::dot(xt::transpose(X), X));
-  std::cerr << evals << std::endl;
-  std::cerr << evecs << std::endl;
+  xt::xarray<std::complex<double>> cplx_evals, cplx_evecs;
+  std::tie(cplx_evals, cplx_evecs) = xt::linalg::eig(xt::linalg::dot(xt::transpose(X), X));
+  std::cerr << cplx_evals << std::endl;
+  std::cerr << cplx_evecs << std::endl;
 
-
+  xt::xarray<double> evals, evecs;
   xt::xarray<double> r = xt::random::rand<double>({X.shape(1)});
 
   auto xcov = xt::linalg::dot(xt::transpose(X), X);
