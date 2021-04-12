@@ -145,7 +145,7 @@ auto compute_cov_mat_eigen(const T& X, std::size_t num_pcs = 10, std::size_t max
     double err = sum(delta * delta)();
     if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
     {
-      std::cerr << "SSE after iteration " << (i + 1) << ": " << err << std::endl;
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
       if (err < tolerance)
         break;
     }
@@ -182,7 +182,7 @@ auto nipals_dense(const MaT& xgeno, std::size_t num_pcs = 10, std::size_t max_it
     auto err = sum(delta * delta)();
     if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
     {
-      std::cerr << "SSE after iteration " << (i + 1) << ": " << err << std::endl;
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
       if (err < tolerance)
         break;
     }
@@ -220,7 +220,7 @@ auto compute_eigen_dense(const std::vector<std::vector<T>>& geno_matrix, std::si
     auto err = sum(delta * delta)();
     if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
     {
-      std::cerr << "SSE after iteration " << (i + 1) << ": " << err << std::endl;
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
       if (err < tolerance)
         break;
     }
@@ -277,7 +277,7 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
     double err = sum(delta * delta)();
     if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
     {
-      std::cerr << "SSE after iteration " << (i + 1) << ": " << err << std::endl;
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
       if (err < tolerance)
         break;
     }
