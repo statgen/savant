@@ -9,7 +9,8 @@ find_package(xtensor-blas REQUIRED)
 find_package(Boost REQUIRED)
 find_package(savvy REQUIRED)
 
-add_executable(savant src/main.cpp src/plot.cpp src/pca.cpp)
+add_executable(savant src/main.cpp src/single.cpp src/plot.cpp src/pca.cpp)
+target_compile_definitions(savant PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
 target_include_directories(savant PRIVATE include ${Boost_INCLUDE_DIRS})
 target_link_libraries(savant savvy xtensor-blas)
 

@@ -14,10 +14,13 @@
 
 int plot_qq_main(int argc, char** argv)
 {
-  if (argc < 3)
+  if (argc < 2)
     return std::cerr << "Error: missing argument (path to results file)\n", EXIT_FAILURE;
 
-  std::string results_file_path = argv[2];
+  if (std::string(argv[0]) != "qq")
+    return std::cerr << "Error: unsupported plot type " << argv[0] << " (only QQ plots are supported)\n", EXIT_FAILURE;
+
+  std::string results_file_path = argv[1];
 
   std::string line;
   shrinkwrap::gz::istream results_file(results_file_path);

@@ -57,7 +57,7 @@ public:
     os << " -e, --tolerance   Tolerance used for convergence (default: 1e-8)\n";
     os << " -h, --help        Print usage\n";
     os << " -i, --iterations  Maximum number of iterations (default: 128)\n";
-    os << " -o, --output      Output path (default: appends index to SAV file)\n";
+    os << " -o, --output      Output path (default: /dev/stdout)\n";
     os << " -p, --pcs         Number of PCs to generate (default: 10)\n";
     //os << " -t, --threads     Number of threads to use (default: 1)\n";
 
