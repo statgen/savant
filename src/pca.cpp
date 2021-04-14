@@ -248,29 +248,48 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
 
     xarray<double> S = xt::zeros<double>(Q.shape());
 
+    //auto start = std::chrono::steady_clock::now();
+    std::vector<double> tmp(Q.shape(1));
     for (std::size_t j = 0; j < geno_matrix.size(); ++j)
     {
       //auto x = adapt(geno_matrix[j], {std::size_t(1), geno_matrix[j].size()});
-      std::vector<double> tmp(Q.shape(1));
-      for (std::size_t k = 0; k < Q.shape(1); ++k)
+      std::fill(tmp.begin(), tmp.end(), 0.);
+//      for (std::size_t k = 0; k < Q.shape(1); ++k)
+//      {
+//        for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+//          tmp[k] += *gt * col(Q, k)[gt.offset()];
+//      }
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
       {
-        for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
-          tmp[k] += *gt * col(Q, k)[gt.offset()];
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
       }
 
       //auto x_t = adapt(geno_matrix[j], {geno_matrix[j].size(), std::size_t(1)});
 
-      for (std::size_t k = 0; k < S.shape(1); ++k)
+//      for (std::size_t k = 0; k < S.shape(1); ++k)
+//      {
+//        for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+//        {
+//          S(gt.offset(), k) += *gt * tmp[k];
+//        }
+//      }
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
       {
-        for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
-        {
-          S(gt.offset(), k) += *gt * tmp[k];
-        }
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k];
       }
 
       //S += dot(x_t, dot(x, Q));
       //std::cerr << S << std::endl;
     }
+    //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
 
     std::tie(Q, R) = qr(S);
     auto delta = Q - Q_prev;
