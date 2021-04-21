@@ -7,7 +7,9 @@
 #ifndef SAVANT_PLOT_HPP
 #define SAVANT_PLOT_HPP
 
+int plot_pca_main(int argc, char** argv);
 int plot_qq_main(int argc, char** argv);
+int plot_main(int argc, char** argv);
 
 #endif // SAVANT_PLOT_HPP
 

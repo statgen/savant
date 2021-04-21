@@ -909,7 +909,7 @@ int main(int argc, char** argv)
   if (args.sub_command() == "single")
     return single_main(argc, argv);
   else if (args.sub_command() == "plot")
-    return plot_qq_main(argc, argv);
+    return plot_main(argc, argv);
   else if (args.sub_command() == "pca")
     return pca_main(argc, argv);
 
