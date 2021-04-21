@@ -378,8 +378,9 @@ bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno)
   savvy::variant var;
   while (geno_file >> var)
   {
+    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
     if (!var.get_format("GT", geno_matrix.back()))
-      return std::cerr << "Error: variant mssing GT field\n", false;
+      return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
 
 //    if (std::isnan(af) || af < min_af || af > max_af)
 //      continue;
@@ -429,7 +430,10 @@ bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno)
     }
 
     for (std::size_t j = 0; j < geno_file.samples().size(); ++j)
+    {
       xgeno(i, j) = (xgeno(i, j) - 2. * af) / std::sqrt(2. * af * (1. - af)); // row normalize
+      assert(!std::isnan(xgeno(i, j)));
+    }
   }
 
   return true;
@@ -473,9 +477,9 @@ int pca_main(int argc, char** argv)
 
   xt::xarray<double> eigvals, eigvecs;
   std::tie(eigvals, eigvecs) = use_cov_mat ?
-    nipals_dense(xgeno, args.num_pcs(), args.max_iterations(), args.tolerance())
+    compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), args.num_pcs(), args.max_iterations(), args.tolerance())
     :
-    compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), args.num_pcs(), args.max_iterations(), args.tolerance());
+    nipals_dense(xgeno, args.num_pcs(), args.max_iterations(), args.tolerance());
   std::cerr << "evals: " << eigvals << std::endl;
   //std::cerr << "evecs: " << eigvecs << std::endl;
 
