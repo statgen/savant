@@ -8,6 +8,7 @@ include(CMakeFindDependencyMacro) # missing in xtensor-blasCMake.config
 find_package(xtensor-blas REQUIRED)
 find_package(Boost REQUIRED)
 find_package(savvy REQUIRED)
+#-DBOOST_UBLAS_NDEBUG
 
 add_executable(savant src/main.cpp src/single.cpp src/plot.cpp src/pca.cpp)
 target_compile_definitions(savant PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")

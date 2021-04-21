@@ -2,7 +2,6 @@
 
 #include <savvy/reader.hpp>
 #include <xtensor/xarray.hpp>
-
 #include <xtensor/xadapt.hpp>
 #include <xtensor/xrandom.hpp>
 #include <xtensor-blas/xlinalg.hpp>
@@ -156,6 +155,74 @@ auto compute_cov_mat_eigen(const T& X, std::size_t num_pcs = 10, std::size_t max
 
   return std::make_tuple(xt::eval(xt::diagonal(R)), Q);
 }
+#if 0
+// https://gitlab.com/libeigen/eigen/-/archive/3.3.9/eigen-3.3.9.tar.gz
+#include <eigen3/Eigen/Sparse>
+#include <eigen3/Eigen/Dense>
+#include <boost/numeric/ublas/matrix_sparse.hpp>
+
+template <typename MaT>
+auto nipals_sparse_ublas(const MaT& xgeno, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  boost::numeric::ublas::compressed_matrix<double> G(0, 0);
+  boost::numeric::ublas::matrix<double> Q;
+
+  Q = boost::numeric::ublas::prod(G, Q);
+
+}
+
+template <typename MaT>
+auto nipals_sparse_eigen3(const MaT& xgeno, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  Eigen::SparseMatrix<double> G(xgeno.shape(0), xgeno.shape(1)); // default is column major
+
+  std::vector<Eigen::Triplet<double>> triplets;
+  for (std::size_t i = 0; i < xgeno.shape(0); ++i)
+  {
+    for (std::size_t j = 0; j < xgeno.shape(1); ++j)
+    {
+      if (xgeno(i, j))
+        triplets.emplace_back(i, j, xgeno(i, j));
+    }
+  }
+  //triplets.emplace_back(16, 745, 1.7);
+  G.setFromTriplets(triplets.begin(), triplets.end());
+
+  Eigen::MatrixXd Q = Eigen::MatrixXd::Random(G.outerSize(), num_pcs);
+  Eigen::MatrixXd R;
+  Eigen::FullPivHouseholderQR<Eigen::MatrixXd> fullPivHouseholderQR(Q.rows(), Q.cols());
+  fullPivHouseholderQR.compute(Q);
+  Q = fullPivHouseholderQR.matrixQ();
+  R = fullPivHouseholderQR.matrixQR().template  triangularView<Eigen::Upper>();
+  Eigen::MatrixXd Q_prev;
+
+//  xarray<double> Q = random::rand<double>({xgeno.shape(1), num_pcs});
+//  xarray<double> R;
+//  std::tie(Q, R) = qr(Q);
+//  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    //auto T = dot(xgeno, Q);
+    //auto S = dot(transpose(xgeno), T);
+    auto P = (G.transpose() * (G * Q)).eval();
+    fullPivHouseholderQR.compute(P);
+    Q = fullPivHouseholderQR.matrixQ();
+    R = fullPivHouseholderQR.matrixQR().template  triangularView<Eigen::Upper>();
+    auto delta = Q - Q_prev;
+    auto err = (delta.cwiseProduct(delta)).sum();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+}
+#endif
 
 template <typename MaT>
 auto nipals_dense(const MaT& xgeno, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
