@@ -12,6 +12,105 @@
 #include <cstdio>
 #include <cmath>
 #include <sstream>
+#include <sys/stat.h>
+#include <getopt.h>
+
+class plot_pca_prog_args
+{
+private:
+  std::vector<option> long_options_;
+  std::string input_path_;
+  std::string pop_map_path_;
+  std::string output_path_ = "/dev/stdout";
+  int first_pc_ = 1;
+  int num_pcs_ = 2;
+  bool help_ = false;
+public:
+  plot_pca_prog_args() :
+    long_options_(
+      {
+        {"help", no_argument, 0, 'h'},
+        {"output", required_argument, 0, 'o'},
+        {"pcs", required_argument, 0, 'p'},
+        {0, 0, 0, 0}
+      })
+  {
+  }
+
+  const std::string& input_path() const { return input_path_; }
+  const std::string& pop_map_path() const { return pop_map_path_; }
+  const std::string& output_path() const { return output_path_; }
+
+  int first_pc() const { return first_pc_; }
+  int num_pcs() const { return num_pcs_; }
+  bool help_is_set() const { return help_; }
+
+  void print_usage(std::ostream& os)
+  {
+    os << "Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>] \n";
+    os << "\n";
+    os << " -h, --help        Print usage\n";
+    os << " -o, --output      Output path (default: /dev/stdout)\n";
+    os << " -p, --pcs         PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)\n";
+    os << std::flush;
+  }
+
+  bool parse(int argc, char** argv)
+  {
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, "ho:p:", long_options_.data(), &long_index )) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case 'h':
+        help_ = true;
+        return true;
+      case 'o':
+        output_path_ = optarg ? optarg : "";
+        break;
+      case 'p':
+      {
+        auto tokens = utility::split_string_to_vector(optarg ? optarg : "", ':');
+        if (tokens.size() < 2 || std::atoi(tokens[0].c_str()) >= std::atoi(tokens[1].c_str()))
+          return std::cerr << "Error: invalid pc range ("<< (optarg ? optarg : "") << ")\n", false;
+
+        first_pc_ = std::atoi(tokens[0].c_str());
+        int last_pc = std::atoi(tokens[1].c_str());
+        num_pcs_ = (last_pc - first_pc_) + 1;
+        break;
+      }
+      default:
+        return false;
+      }
+    }
+
+    int remaining_arg_count = argc - optind;
+
+    if (remaining_arg_count == 1)
+    {
+      input_path_ = argv[optind];
+    }
+    else if (remaining_arg_count == 2)
+    {
+      input_path_ = argv[optind];
+      pop_map_path_ = argv[optind + 1];
+    }
+    else if (remaining_arg_count < 1)
+    {
+      std::cerr << "Too few arguments\n";
+      return false;
+    }
+    else
+    {
+      std::cerr << "Too many arguments\n";
+      return false;
+    }
+
+    return true;
+  }
+};
 
 // from color brewer sequential
 std::unordered_map<std::string, std::string> population_to_color = {
@@ -61,10 +160,18 @@ std::unordered_map<std::string, std::string> population_to_color = {
 
 int plot_pca_main(int argc, char** argv)
 {
-  if (argc < 2)
-    return std::cerr << "Error: missing argument (Usage: savant plot pca <results_file> [population_map])\n", EXIT_FAILURE;
+  plot_pca_prog_args args;
+  if (!args.parse(argc, argv))
+  {
+    args.print_usage(std::cerr);
+    return EXIT_FAILURE;
+  }
 
-  std::string results_file_path = argv[1];
+  if (args.help_is_set())
+  {
+    args.print_usage(std::cout);
+    return EXIT_SUCCESS;
+  }
 
 
   std::string line;
@@ -73,18 +180,17 @@ int plot_pca_main(int argc, char** argv)
   std::list<std::string> ordered_populations;
 
 
-  if (argc > 2)
+  if (!args.pop_map_path().empty())
   {
-    std::string population_map_file_path = argv[2];
-    std::ifstream population_map_file(population_map_file_path);
+    std::ifstream population_map_file(args.pop_map_path());
     if (!population_map_file)
-      return std::cerr << "Error: could not open population map file ("<< population_map_file_path << ")\n", EXIT_FAILURE;
+      return std::cerr << "Error: could not open population map file ("<< args.pop_map_path() << ")\n", EXIT_FAILURE;
 
     while (std::getline(population_map_file, line))
     {
       auto fields = utility::split_string_to_vector(line, '\t');
       if (fields.size() < 2)
-        return std::cerr << "Error: not enough columns in " << population_map_file_path << "\n", EXIT_FAILURE;
+        return std::cerr << "Error: not enough columns in " << args.pop_map_path() << "\n", EXIT_FAILURE;
       std::uint8_t& c = population_to_color[fields[1]];
       if (c == 0 && fields[1].size())
       {
@@ -96,18 +202,12 @@ int plot_pca_main(int argc, char** argv)
     }
   }
 
-  std::string pcs_arg_str = "1:3";
-  auto pcs_arg = utility::split_string_to_vector(pcs_arg_str, ':');
-  if (pcs_arg.size() < 2 || std::atoi(pcs_arg[0].c_str()) >= std::atoi(pcs_arg[1].c_str()))
-    return std::cerr << "Error: invalid pc range ("<< pcs_arg_str << ")\n", EXIT_FAILURE;
 
-  int first_pc = std::atoi(pcs_arg[0].c_str());
-  int last_pc = std::atoi(pcs_arg[1].c_str());
-  int num_pcs = last_pc - first_pc;
 
-  shrinkwrap::gz::istream results_file(results_file_path);
+
+  shrinkwrap::gz::istream results_file(args.input_path());
   if (!results_file || !std::getline(results_file, line))
-    return std::cerr << "Error: could not open results file ("<< results_file_path << ")\n", EXIT_FAILURE;
+    return std::cerr << "Error: could not open results file ("<< args.input_path() << ")\n", EXIT_FAILURE;
 
 
   auto fields = utility::split_string_to_vector(line, '\t');
@@ -115,7 +215,7 @@ int plot_pca_main(int argc, char** argv)
   if (fields.empty())
     return std::cerr << "Error: empty header line\n", EXIT_FAILURE;
 
-  std::string first_pc_header = "pc" + std::to_string(first_pc);
+  std::string first_pc_header = "pc" + std::to_string(args.first_pc());
   std::size_t sample_idx = 0; // TODO: add option
   std::size_t first_pc_idx = 0;
   for ( ; first_pc_idx < fields.size(); ++first_pc_idx)
@@ -124,8 +224,8 @@ int plot_pca_main(int argc, char** argv)
   if (first_pc_idx == fields.size())
     return std::cerr << "Error: '" << first_pc_header << "' missing from header line\n", EXIT_FAILURE;
 
-  if (fields.size() <= first_pc_idx + num_pcs)
-    return std::cerr << "Error: last pc (" << last_pc << ") out of header line range\n", EXIT_FAILURE;
+  if (fields.size() <= first_pc_idx + args.num_pcs())
+    return std::cerr << "Error: last pc (" << (args.first_pc() + args.num_pcs()) - 1 << ") out of header line range\n", EXIT_FAILURE;
 
   // ================ //
   // TODO: allow for custom population => color map files
@@ -142,7 +242,7 @@ int plot_pca_main(int argc, char** argv)
   //                          "plot '/dev/stdin' u 1:2:(anc_to_color(strcol(3))) w points pt 6 lc variable, for [i=1:words(ancestries)] NaN title word(ancestries, i) lc i";
 
 
-  if (num_pcs == 2)
+  if (args.num_pcs() == 2)
   {
     // set linetype 1 linecolor rgb '
     // set style line 1 lt 1 lc 'black; set style increment user;'
@@ -167,11 +267,105 @@ int plot_pca_main(int argc, char** argv)
       if (first_pc_idx + 1 >= fields.size())
         return std::cerr << "Error: number of columns do not match header line at line " << cnt << std::endl, EXIT_FAILURE;
 
-      std::fprintf(pipe, "%s\t%s\t%u\n", fields[first_pc_idx].c_str(), fields[first_pc_idx + 1].c_str(), 1 + sample_to_color[fields[sample_idx]]); // TODO: handle parse failure.
+      std::fprintf(pipe, "%s\t%s\t%u\n", fields[first_pc_idx].c_str(), fields[first_pc_idx + 1].c_str(), 1 + sample_to_color[fields[sample_idx]]);
       ++cnt;
     }
 
     pclose(pipe);
+  }
+  else
+  {
+    std::string temp_prefix = std::tmpnam(nullptr);
+    std::cerr << "Creating temp directory " << temp_prefix << std::endl;
+    if (::mkdir(temp_prefix.c_str(), 0700))
+      return std::cerr << "Error: could not create temp directory\n", EXIT_FAILURE;
+
+    temp_prefix += '/';
+
+    //double max_x = 0.;
+    //double max_y = 0.;
+    std::size_t cnt = 1;
+    std::list<std::ofstream> temp_files;
+    std::list<std::string> temp_file_names;
+    for (std::size_t j = 0; j < args.num_pcs(); ++j)
+    {
+      for (std::size_t i = j + 1; i < args.num_pcs(); ++i)
+      {
+        temp_file_names.emplace_back(temp_prefix + std::to_string(i) + "_" + std::to_string(j) + ".tsv");
+        temp_files.emplace_back(temp_file_names.back());
+      }
+    }
+
+    while (std::getline(results_file, line))
+    {
+      fields = utility::split_string_to_vector(line, '\t');
+
+      if (first_pc_idx + args.num_pcs() >= fields.size())
+        return std::cerr << "Error: number of columns do not match header line at line " << cnt << std::endl, EXIT_FAILURE;
+
+      auto tmp_it = temp_files.begin();
+      for (std::size_t j = 0; j < args.num_pcs(); ++j)
+      {
+        for (std::size_t i = j + 1; i < args.num_pcs(); ++i)
+        {
+          *tmp_it << fields[first_pc_idx + j].c_str() << "\t" << fields[first_pc_idx + i] << "\t" << 1 + sample_to_color[fields[sample_idx]] << "\n";
+          ++tmp_it;
+        }
+      }
+      ++cnt;
+    }
+
+    //std::ofstream plot_cmd("/dev/stdout");
+    std::stringstream plot_cmd;
+    plot_cmd << "gnuplot --persist -e \"set multiplot layout " << args.num_pcs() << "," << args.num_pcs() << " rowsfirst; ";
+    plot_cmd << "set style increment user; ";
+    for (std::size_t i = 0; i < args.num_pcs(); ++i)
+    {
+      for (std::size_t j = 0; j < args.num_pcs(); ++j)
+      {
+        if (i < j)
+        {
+          plot_cmd << "unset border; unset tics; ";
+          if (i == 0 && j + 1 == args.num_pcs())
+          {
+            plot_cmd << "set key center center; ";
+            plot_cmd << "plot [-1:1][-1:1] '< echo 0 0' w labels notitle";
+            for (const auto& p : ordered_populations)
+              plot_cmd << ", NaN w circles title '" << p << "' ls " << 1 + population_to_color[p];
+            plot_cmd << "; ";
+          }
+          else
+          {
+            plot_cmd << "plot [-1:1][-1:1] '< echo 0 0' w labels notitle; ";
+          }
+          plot_cmd << "set border; set tics; ";
+        }
+        else if (j == i)
+        {
+          //plot_cmd << "unset tics; ";
+          plot_cmd << "unset border; unset tics; ";
+          plot_cmd << "plot [-1:1][-1:1] '< echo 0 0 PC" << i + args.first_pc() << "' w labels notitle; ";
+          plot_cmd << "set border; set tics; ";
+          //plot_cmd << "set tics; ";
+        }
+        else
+        {
+          plot_cmd << "plot '" << temp_prefix << i << "_" << j << ".tsv' u 1:2:3 w points pt 6 lc variable notitle; ";
+        }
+      }
+    }
+    plot_cmd << "unset multiplot\"";
+
+    std::FILE* pipe = popen(plot_cmd.str().c_str(), "w");
+    if (!pipe)
+      return perror("popen"), EXIT_FAILURE;
+    pclose(pipe);
+
+    for (const auto& t: temp_file_names)
+      std::remove(t.c_str());
+
+    if (::rmdir(temp_prefix.c_str()))
+      std::cerr << "Warning:: failed to close temp directory\n";
   }
 
   return EXIT_SUCCESS;
