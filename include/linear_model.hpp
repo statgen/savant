@@ -133,19 +133,19 @@ public:
     const scalar_type m       = (n * s_xy - s_x * s_y_) / (n * s_xx - s_x * s_x);
     const scalar_type x_mean  = s_x / n;
 
-    scalar_type se_x_mean{};
+//    scalar_type se_x_mean{};
+//    for (auto it = x.begin(); it != x.end(); ++it)
+//    {
+//      se_x_mean += square(*it - x_mean);
+//    }
+//    se_x_mean += (square(0.0f - x_mean) * scalar_type(n - x.non_zero_size()));
 
-    for (auto it = x.begin(); it != x.end(); ++it)
-    {
-      se_x_mean += square(*it - x_mean);
-    }
-
-    se_x_mean += (square(0.0f - x_mean) * scalar_type(n - x.non_zero_size()));
-    scalar_type se2 = 1./(n*(n-2)) * (n*s_yy_ - s_y_*s_y_ - square(m)*(n*s_xx - square(s_x)));
+    //scalar_type se2 = 1./(n*(n-2)) * (n*s_yy_ - s_y_*s_y_ - square(m)*(n*s_xx - square(s_x)));
     scalar_type r = (n * s_xy - s_x * s_y_) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy_ - s_y_ * s_y_ ));
 
     const scalar_type dof = n - 2;
-    const scalar_type std_err = std::sqrt(se2) / std::sqrt(se_x_mean);
+    //const scalar_type std_err = std::sqrt(se2) / std::sqrt(se_x_mean);
+    const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
