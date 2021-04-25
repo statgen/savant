@@ -21,6 +21,7 @@ private:
   std::vector<option> long_options_;
   std::string input_path_;
   std::string pop_map_path_;
+  std::string custom_plot_commands_;
   std::string output_path_ = "/dev/stdout";
   int first_pc_ = 1;
   int num_pcs_ = 2;
@@ -29,6 +30,7 @@ public:
   plot_pca_prog_args() :
     long_options_(
       {
+        {"gnuplot-opts", required_argument, 0, 'g'},
         {"help", no_argument, 0, 'h'},
         {"output", required_argument, 0, 'o'},
         {"pcs", required_argument, 0, 'p'},
@@ -40,6 +42,7 @@ public:
   const std::string& input_path() const { return input_path_; }
   const std::string& pop_map_path() const { return pop_map_path_; }
   const std::string& output_path() const { return output_path_; }
+  const std::string& custom_plot_commands() const { return custom_plot_commands_; }
 
   int first_pc() const { return first_pc_; }
   int num_pcs() const { return num_pcs_; }
@@ -49,9 +52,10 @@ public:
   {
     os << "Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>] \n";
     os << "\n";
-    os << " -h, --help        Print usage\n";
-    os << " -o, --output      Output path (default: /dev/stdout)\n";
-    os << " -p, --pcs         PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)\n";
+    os << " -g, --gnuplot-opts  Custom gnuplot commands to include\n";
+    os << " -h, --help          Print usage\n";
+    os << " -o, --output        Output path (default: /dev/stdout)\n";
+    os << " -p, --pcs           PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)\n";
     os << std::flush;
   }
 
@@ -59,11 +63,16 @@ public:
   {
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, "ho:p:", long_options_.data(), &long_index )) != -1)
+    while ((opt = getopt_long(argc, argv, "g:ho:p:", long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
       {
+      case 'g':
+        custom_plot_commands_ = optarg ? optarg : "";
+        custom_plot_commands_.erase(custom_plot_commands_.find_last_not_of(" \t\r\n;") + 1);
+        custom_plot_commands_ += "; ";
+        break;
       case 'h':
         help_ = true;
         return true;
@@ -249,6 +258,8 @@ int plot_pca_main(int argc, char** argv)
     // load '~/.gnuplot-colorbrewer/qualitative/Dark2.plt';
     std::stringstream plot_cmd;
     plot_cmd << "gnuplot --persist -e \"";
+    if (args.custom_plot_commands().size())
+      plot_cmd << args.custom_plot_commands();
     plot_cmd << "set style increment user; ";
     plot_cmd << "plot '/dev/stdin' u 1:2:3 w points pt 6 lc variable notitle";
     for (const auto& p : ordered_populations)
@@ -275,10 +286,9 @@ int plot_pca_main(int argc, char** argv)
   }
   else
   {
-    std::string temp_prefix = std::tmpnam(nullptr);
-    std::cerr << "Creating temp directory " << temp_prefix << std::endl;
-    if (::mkdir(temp_prefix.c_str(), 0700))
-      return std::cerr << "Error: could not create temp directory\n", EXIT_FAILURE;
+    char tmpl[] = "/tmp/tmp_savant_XXXXXX";
+    std::string temp_prefix = mkdtemp(tmpl); //std::tmpnam(nullptr);
+    std::cerr << "Created temp directory " << temp_prefix << std::endl;
 
     temp_prefix += '/';
 
@@ -317,7 +327,10 @@ int plot_pca_main(int argc, char** argv)
 
     //std::ofstream plot_cmd("/dev/stdout");
     std::stringstream plot_cmd;
-    plot_cmd << "gnuplot --persist -e \"set multiplot layout " << args.num_pcs() << "," << args.num_pcs() << " rowsfirst; ";
+    plot_cmd << "gnuplot --persist -e \"";
+    if (args.custom_plot_commands().size())
+      plot_cmd << args.custom_plot_commands();
+    plot_cmd << "set multiplot layout " << args.num_pcs() << "," << args.num_pcs() << " rowsfirst; ";
     plot_cmd << "set style increment user; ";
     for (std::size_t i = 0; i < args.num_pcs(); ++i)
     {
