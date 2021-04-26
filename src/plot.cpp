@@ -256,6 +256,7 @@ int plot_pca_main(int argc, char** argv)
     // set linetype 1 linecolor rgb '
     // set style line 1 lt 1 lc 'black; set style increment user;'
     // load '~/.gnuplot-colorbrewer/qualitative/Dark2.plt';
+    // set terminal jpeg size 1600,1200 enhanced font ',18'; set xtics ('0' 0); set ytics ('0' 0)
     std::stringstream plot_cmd;
     plot_cmd << "gnuplot --persist -e \"";
     if (args.custom_plot_commands().size())
@@ -332,6 +333,7 @@ int plot_pca_main(int argc, char** argv)
       plot_cmd << args.custom_plot_commands();
     plot_cmd << "set multiplot layout " << args.num_pcs() << "," << args.num_pcs() << " rowsfirst; ";
     plot_cmd << "set style increment user; ";
+    plot_cmd << "save set '| grep -v range | grep -v origin > " << temp_prefix << "settings.gnu'; ";
     for (std::size_t i = 0; i < args.num_pcs(); ++i)
     {
       for (std::size_t j = 0; j < args.num_pcs(); ++j)
@@ -351,15 +353,13 @@ int plot_pca_main(int argc, char** argv)
           {
             plot_cmd << "plot [-1:1][-1:1] '< echo 0 0' w labels notitle; ";
           }
-          plot_cmd << "set border; set tics; ";
+          plot_cmd << "load '" << temp_prefix << "settings.gnu'; ";
         }
         else if (j == i)
         {
-          //plot_cmd << "unset tics; ";
           plot_cmd << "unset border; unset tics; ";
           plot_cmd << "plot [-1:1][-1:1] '< echo 0 0 PC" << i + args.first_pc() << "' w labels notitle; ";
-          plot_cmd << "set border; set tics; ";
-          //plot_cmd << "set tics; ";
+          plot_cmd << "load '" << temp_prefix << "settings.gnu'; ";
         }
         else
         {
@@ -376,9 +376,10 @@ int plot_pca_main(int argc, char** argv)
 
     for (const auto& t: temp_file_names)
       std::remove(t.c_str());
+    std::remove((temp_prefix + "settings.gnu").c_str());
 
     if (::rmdir(temp_prefix.c_str()))
-      std::cerr << "Warning:: failed to close temp directory\n";
+      std::cerr << "Warning:: failed to remove temp directory\n";
   }
 
   return EXIT_SUCCESS;
