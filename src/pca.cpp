@@ -372,7 +372,7 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
   return std::make_tuple(eval(diagonal(R)), Q);
 }
 
-bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno)
+bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno, bool center)
 {
   std::vector<savvy::compressed_vector<std::int8_t>> geno_matrix(1);
   savvy::variant var;
@@ -429,9 +429,10 @@ bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno)
         xgeno(i, jt.offset() / stride) += *jt;
     }
 
+    double mean = center ? 2. * af : 0.;
     for (std::size_t j = 0; j < geno_file.samples().size(); ++j)
     {
-      xgeno(i, j) = (xgeno(i, j) - 2. * af) / std::sqrt(2. * af * (1. - af)); // row normalize
+      xgeno(i, j) = (xgeno(i, j) - mean) / std::sqrt(2. * af * (1. - af)); // row normalize
       assert(!std::isnan(xgeno(i, j)));
     }
   }
@@ -459,7 +460,7 @@ int pca_main(int argc, char** argv)
     return std::cerr << "Error: could not open genotype file ("<< args.input_path() << ")\n", EXIT_FAILURE;
 
   xt::xtensor<double, 2> xgeno;
-  if (!load_geno_matrix(geno_file, xgeno))
+  if (!load_geno_matrix(geno_file, xgeno, true))
     return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
 
   auto nipals_complexity = [](std::size_t m, std::size_t n) { return std::size_t(2) * m * n; };
