@@ -23,6 +23,7 @@ private:
   std::size_t max_iterations_ = 128;
   std::int8_t use_cov_mat_ = -1;
   std::size_t num_pcs_ = 10;
+  bool is_sparse_ = false;
   bool help_ = false;
 public:
   pca_prog_args() :
@@ -33,6 +34,7 @@ public:
         {"iterations", required_argument, 0, 'i'},
         {"output", required_argument, 0, 'o'},
         {"pcs", required_argument, 0, 'p'},
+        {"sparse", no_argument, 0, 's'},
         {"tolerance", required_argument, 0, 'e'},
         {0, 0, 0, 0}
       })
@@ -46,6 +48,7 @@ public:
   std::size_t max_iterations() const { return max_iterations_; }
   std::size_t num_pcs() const { return num_pcs_; }
   std::int8_t use_cov_mat() const { return use_cov_mat_; }
+  bool is_sparse() const { return is_sparse_; }
   bool help_is_set() const { return help_; }
 
   void print_usage(std::ostream& os)
@@ -67,7 +70,7 @@ public:
   {
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, "c:e:hi:o:p:", long_options_.data(), &long_index )) != -1)
+    while ((opt = getopt_long(argc, argv, "c:e:hi:o:p:s", long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
@@ -89,6 +92,9 @@ public:
         break;
       case 'p':
         num_pcs_ = std::atoi(optarg ? optarg : "");
+        break;
+      case 's':
+        is_sparse_ = true;
         break;
       default:
         return false;
@@ -243,7 +249,7 @@ auto nipals_dense(const MaT& xgeno, std::size_t num_pcs = 10, std::size_t max_it
 
     //auto T = dot(xgeno, Q);
     //auto S = dot(transpose(xgeno), T);
-
+    //std::cerr << eval(dot(transpose(xgeno), dot(xgeno, Q))) << std::endl;
     std::tie(Q, R) = qr(dot(transpose(xgeno), dot(xgeno, Q)));
     auto delta = Q - Q_prev;
     auto err = sum(delta * delta)();
@@ -358,6 +364,7 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
     }
     //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
 
+    //std::cerr << S << std::endl;
     std::tie(Q, R) = qr(S);
     auto delta = Q - Q_prev;
     double err = sum(delta * delta)();
@@ -370,6 +377,49 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
   }
 
   return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_vector<double>>& geno)
+{
+  geno.resize(1);
+  savvy::variant var;
+  while (geno_file >> var)
+  {
+    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
+    if (!var.get_format("GT", geno.back()))
+      return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
+
+    std::size_t an = geno.back().size();
+    double ac{};
+    for (auto it = geno.back().begin(); it != geno.back().end(); ++it)
+    {
+      if (std::isnan(*it)) // missing
+        --an;
+      else
+        ac += *it;
+    }
+
+    double af = ac / an;
+    double denom = std::sqrt(2. * af * (1. - af));
+    for (auto it = geno.back().begin(); it != geno.back().end(); ++it)
+    {
+      if (std::isnan(*it))
+        *it = af / denom; // mean impute missing
+      else
+        *it = *it / denom;
+    }
+
+    savvy::stride_reduce(geno.back(), geno.back().size() / geno_file.samples().size());
+
+    geno.emplace_back();
+  }
+
+  geno.pop_back();
+
+  if (geno_file.bad())
+    return std::cerr << "Error: read failure\n", false;
+
+  return true;
 }
 
 bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno, bool center)
@@ -459,28 +509,44 @@ int pca_main(int argc, char** argv)
   if (!geno_file)
     return std::cerr << "Error: could not open genotype file ("<< args.input_path() << ")\n", EXIT_FAILURE;
 
-  xt::xtensor<double, 2> xgeno;
-  if (!load_geno_matrix(geno_file, xgeno, true))
-    return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
-
-  auto nipals_complexity = [](std::size_t m, std::size_t n) { return std::size_t(2) * m * n; };
-  auto cov_complexity = [](std::size_t m, std::size_t n) { return n * n; };
-
-  std::size_t m = xgeno.shape(0), n = xgeno.shape(1);
-  std::cerr << "Loaded " << m << " variants from " << n << " samples" << std::endl;
-
-  bool use_cov_mat = args.use_cov_mat() < 0 ? nipals_complexity(m, n) > cov_complexity(m, n) : (bool)args.use_cov_mat();
-
-  if (use_cov_mat)
-    std::cerr << "Using covariance matrix" << std::endl;
-  else
-    std::cerr << "Not using covariance matrix" << std::endl;
-
   xt::xarray<double> eigvals, eigvecs;
-  std::tie(eigvals, eigvecs) = use_cov_mat ?
-    compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), args.num_pcs(), args.max_iterations(), args.tolerance())
-    :
-    nipals_dense(xgeno, args.num_pcs(), args.max_iterations(), args.tolerance());
+  if (args.is_sparse())
+  {
+    std::vector<savvy::compressed_vector<double>> geno;
+    if (!load_geno_matrix(geno_file, geno) || geno.empty())
+      return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
+
+    std::size_t m = geno.size(), n = geno[0].size();
+    std::cerr << "Loaded " << m << " sparse variants from " << n << " samples" << std::endl;
+
+    std::tie(eigvals, eigvecs) = compute_eigen_sparse(geno, args.num_pcs(), args.max_iterations(), args.tolerance());
+  }
+  else
+  {
+
+    xt::xtensor<double, 2> xgeno;
+    if (!load_geno_matrix(geno_file, xgeno, true))
+      return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
+
+    auto nipals_complexity = [](std::size_t m, std::size_t n) { return std::size_t(2) * m * n; };
+    auto cov_complexity = [](std::size_t m, std::size_t n) { return n * n; };
+
+    std::size_t m = xgeno.shape(0), n = xgeno.shape(1);
+    std::cerr << "Loaded " << m << " variants from " << n << " samples" << std::endl;
+
+    bool use_cov_mat = args.use_cov_mat() < 0 ? nipals_complexity(m, n) > cov_complexity(m, n) : (bool)args.use_cov_mat();
+
+    if (use_cov_mat)
+      std::cerr << "Using covariance matrix" << std::endl;
+    else
+      std::cerr << "Not using covariance matrix" << std::endl;
+
+    std::tie(eigvals, eigvecs) = use_cov_mat ?
+      compute_cov_mat_eigen(xt::linalg::dot(xt::transpose(xgeno), xgeno), args.num_pcs(), args.max_iterations(), args.tolerance())
+      :
+      nipals_dense(xgeno, args.num_pcs(), args.max_iterations(), args.tolerance());
+  }
+
   std::cerr << "evals: " << eigvals << std::endl;
   //std::cerr << "evecs: " << eigvecs << std::endl;
 
