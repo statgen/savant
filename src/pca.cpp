@@ -550,7 +550,7 @@ int pca_main(int argc, char** argv)
   std::cerr << "evals: " << eigvals << std::endl;
   //std::cerr << "evecs: " << eigvecs << std::endl;
 
-  std::ofstream eigvec_file("/dev/stdout", std::ios::binary);
+  std::ofstream eigvec_file(args.output_path(), std::ios::binary);
   eigvec_file << "sample_id";
   for (std::size_t i = 1; i <= eigvecs.shape(1); ++i)
     eigvec_file << "\tpc" << i;
