@@ -379,7 +379,338 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
   return std::make_tuple(eval(diagonal(R)), Q);
 }
 
-bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_vector<double>>& geno)
+template <typename T>
+auto compute_eigen_sparse_centered(const std::vector<savvy::compressed_vector<T>>& geno_matrix, const std::vector<double>& standardization_vec, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  assert(geno_matrix.size());
+
+  xarray<double> Q = random::rand<double>({geno_matrix[0].size(), num_pcs});
+  xarray<double> R;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    xarray<double> S = xt::zeros<double>(Q.shape());
+
+    //auto start = std::chrono::steady_clock::now();
+    //xt::xtensor<double, 2> T = xt::zeros<double>({geno_matrix.size(), Q.shape(1)});
+    std::vector<double> tmp(Q.shape(1));
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      std::fill(tmp.begin(), tmp.end(), 0.);
+      // ========== //
+      // centering
+      double std_coef = standardization_vec[j];
+      //double* tmp = &T(j, 0);
+      for (std::size_t g = 0; g < Q.shape(0); ++g)
+      {
+        double* p = &Q(g, 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] -= std_coef * p[k];
+        }
+      }
+      // ========== //
+
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
+      }
+
+      //auto x_t = adapt(geno_matrix[j], {geno_matrix[j].size(), std::size_t(1)});
+
+//      for (std::size_t k = 0; k < S.shape(1); ++k)
+//      {
+//        for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+//        {
+//          S(gt.offset(), k) += *gt * tmp[k];
+//        }
+//      }
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k] - std_coef * tmp[k];
+      }
+
+      //S += dot(x_t, dot(x, Q));
+      //std::cerr << S << std::endl;
+    }
+    //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
+
+    //std::cerr << S << std::endl;
+    std::tie(Q, R) = qr(S);
+    auto delta = Q - Q_prev;
+    double err = sum(delta * delta)();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+template <typename ScalarT, typename CVecT>
+auto compute_eigen_sparse_centered2(const std::vector<savvy::compressed_vector<ScalarT>>& geno_matrix, const CVecT& standardization_vec, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  assert(geno_matrix.size());
+
+  xarray<double> Q = random::rand<double>({geno_matrix[0].size(), num_pcs});
+  xarray<double> R;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    xarray<double> S = xt::zeros<double>(Q.shape());
+
+    //auto start = std::chrono::steady_clock::now();
+    xt::xtensor<double, 2> T = xt::zeros<double>({geno_matrix.size(), Q.shape(1)});
+    //std::vector<double> tmp(Q.shape(1));
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      //std::fill(tmp.begin(), tmp.end(), 0.);
+      // ========== //
+      // centering
+      double std_coef = standardization_vec[j];
+      double* tmp = &T(j, 0);
+      for (std::size_t g = 0; g < Q.shape(0); ++g)
+      {
+        double* p = &Q(g, 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] -= std_coef * p[k];
+        }
+      }
+      // ========== //
+
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
+      }
+    }
+
+    xt::xtensor<double, 1> temp2 = -xt::linalg::dot(standardization_vec, T);
+    for (std::size_t l = 0; l < S.shape(0); ++l)
+    {
+      xt::row(S, l) = temp2;
+    }
+
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      double* tmp = &T(j, 0);
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k];
+      }
+
+      //S += dot(x_t, dot(x, Q));
+      //std::cerr << S << std::endl;
+    }
+    //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
+
+    //std::cerr << S << std::endl;
+    std::tie(Q, R) = qr(S);
+    auto delta = Q - Q_prev;
+    double err = sum(delta * delta)();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+template <typename ScalarT, typename CVecT>
+auto compute_eigen_sparse_centered3(const std::vector<savvy::compressed_vector<ScalarT>>& geno_matrix, const CVecT& standardization_vec, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  assert(geno_matrix.size());
+
+  xarray<double> Q = random::rand<double>({geno_matrix[0].size(), num_pcs});
+  xarray<double> R;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    xarray<double> S = xt::zeros<double>(Q.shape());
+
+    //auto start = std::chrono::steady_clock::now();
+    xt::xtensor<double, 2> T = xt::zeros<double>({geno_matrix.size(), Q.shape(1)});
+    //std::vector<double> tmp(Q.shape(1));
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      //std::fill(tmp.begin(), tmp.end(), 0.);
+      // ========== //
+      // centering
+      double std_coef = standardization_vec[j];
+      double* tmp = &T(j, 0);
+      for (std::size_t g = 0; g < Q.shape(0); ++g)
+      {
+        double* p = &Q(g, 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] -= std_coef * p[k];
+        }
+      }
+      // ========== //
+
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
+      }
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k];
+      }
+
+      //S += dot(x_t, dot(x, Q));
+      //std::cerr << S << std::endl;
+    }
+
+    xt::xtensor<double, 1> temp2 = xt::linalg::dot(standardization_vec, T);
+    S -= temp2;
+//    for (std::size_t l = 0; l < S.shape(0); ++l)
+//    {
+//      xt::row(S, l) -= temp2;
+//    }
+
+    //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
+
+    //std::cerr << S << std::endl;
+    std::tie(Q, R) = qr(S);
+    auto delta = Q - Q_prev;
+    double err = sum(delta * delta)();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+template <typename ScalarT, typename CVecT>
+auto compute_eigen_sparse_centered4(const std::vector<savvy::compressed_vector<ScalarT>>& geno_matrix, const CVecT& standardization_vec, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  assert(geno_matrix.size());
+
+  xarray<double> Q = random::rand<double>({geno_matrix[0].size(), num_pcs});
+  xarray<double> R;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    xarray<double> S = xt::zeros<double>(Q.shape());
+
+    //auto start = std::chrono::steady_clock::now();
+    // ========== //
+    // center right product
+    xt::xtensor<double, 2> T = xt::xtensor<double, 2>::from_shape({geno_matrix.size(), Q.shape(1)});
+    xt::xtensor<double, 1> col_sum_Q = -xt::sum(Q, {0});
+    for (std::size_t j = 0; j < T.shape(0); ++j)
+      xt::row(T, j) = col_sum_Q * standardization_vec[j];
+    // ========== //
+
+    //std::vector<double> tmp(Q.shape(1));
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      double* tmp = &T(j, 0);
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
+      }
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k];
+      }
+
+      //std::cerr << S << std::endl;
+    }
+
+    // ========== //
+    // center left product
+    xt::xtensor<double, 1> temp2 = xt::linalg::dot(standardization_vec, T);
+    S -= temp2;
+    // ========== //
+
+    //std::cerr << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count() << "s" <<  std::endl;
+
+    //std::cerr << S << std::endl;
+    std::tie(Q, R) = qr(S);
+    auto delta = Q - Q_prev;
+    double err = sum(delta * delta)();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
+bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_vector<double>>& geno, std::vector<double>& centering_vec)
 {
   geno.resize(0);
   savvy::variant var;
@@ -419,6 +750,7 @@ bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_ve
       savvy::stride_reduce(bi_geno_vec, bi_geno_vec.size() / geno_file.samples().size());
 
       geno.emplace_back(bi_geno_vec.value_data(), bi_geno_vec.value_data() + bi_geno_vec.non_zero_size(), bi_geno_vec.index_data(), bi_geno_vec.size()); // copy operators not yet overloaded.
+      centering_vec.emplace_back(2. * af / denom);
     }
   }
 
@@ -430,27 +762,6 @@ bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_ve
 
 bool load_geno_matrix(savvy::reader& geno_file, std::size_t& n_variants, xt::xtensor<double, 2>& xgeno, bool center)
 {
-
-
-//  std::vector<savvy::compressed_vector<std::int8_t>> geno_matrix(1);
-//  savvy::variant var;
-//  while (geno_file >> var)
-//  {
-//    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
-//    if (!var.get_format("GT", geno_matrix.back()))
-//      return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
-//
-////    if (std::isnan(af) || af < min_af || af > max_af)
-////      continue;
-//
-//    geno_matrix.emplace_back();
-////    if (geno_matrix.size() == 101)
-////      break;
-//  }
-//
-//  geno_matrix.pop_back();
-//  xgeno.resize({geno_matrix.size(), geno_file.samples().size()});
-
   xgeno.resize({n_variants, geno_file.samples().size()});
   xgeno.fill(0.);
 
@@ -519,6 +830,11 @@ bool load_geno_matrix(savvy::reader& geno_file, std::size_t& n_variants, xt::xte
 
 int pca_main(int argc, char** argv)
 {
+#ifdef NDEBUG
+  std::cerr << "release build" << std::endl;
+#else
+  std::cerr << "debug build" << std::endl;
+#endif
   pca_prog_args args;
   if (!args.parse(argc, argv))
   {
@@ -540,13 +856,18 @@ int pca_main(int argc, char** argv)
   if (args.is_sparse())
   {
     std::vector<savvy::compressed_vector<double>> geno;
-    if (!load_geno_matrix(geno_file, geno) || geno.empty())
+    std::vector<double> centering_vec;
+    if (!load_geno_matrix(geno_file, geno, centering_vec) || geno.empty())
       return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
 
     std::size_t m = geno.size(), n = geno[0].size();
     std::cerr << "Loaded " << m << " sparse variants from " << n << " samples" << std::endl;
 
-    std::tie(eigvals, eigvecs) = compute_eigen_sparse(geno, args.num_pcs(), args.max_iterations(), args.tolerance());
+    bool center = true;
+    if (center)
+      std::tie(eigvals, eigvecs) = compute_eigen_sparse_centered4(geno, xt::adapt(centering_vec), args.num_pcs(), args.max_iterations(), args.tolerance());
+    else
+      std::tie(eigvals, eigvecs) = compute_eigen_sparse(geno, args.num_pcs(), args.max_iterations(), args.tolerance());
   }
   else
   {
