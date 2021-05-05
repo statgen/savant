@@ -381,40 +381,46 @@ auto compute_eigen_sparse(const std::vector<savvy::compressed_vector<T>>& geno_m
 
 bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_vector<double>>& geno)
 {
-  geno.resize(1);
+  geno.resize(0);
   savvy::variant var;
+  savvy::compressed_vector<std::int8_t> geno_vec;
+  savvy::compressed_vector<double> bi_geno_vec;
   while (geno_file >> var)
   {
-    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
-    if (!var.get_format("GT", geno.back()))
+    if (var.alts().size() < 1) continue;
+    if (!var.get_format("GT", geno_vec))
       return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
 
-    std::size_t an = geno.back().size();
-    double ac{};
-    for (auto it = geno.back().begin(); it != geno.back().end(); ++it)
+    for (std::size_t allele_idx = 1; allele_idx <= var.alts().size(); ++allele_idx)
     {
-      if (std::isnan(*it)) // missing
-        --an;
-      else
-        ac += *it;
+      std::size_t an = geno_vec.size();
+      std::size_t ac = 0;
+      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+      {
+        if (*it < 0) // missing
+          --an;
+        else
+          ac += int(*it == allele_idx);
+      }
+
+      bi_geno_vec.clear();
+      bi_geno_vec.resize(geno_vec.size());
+
+      double af = static_cast<double>(ac) / an;
+      double denom = std::sqrt(2. * af * (1. - af));
+      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+      {
+        if (*it < 0)
+          bi_geno_vec[it.offset()] = af / denom; // mean impute missing
+        else if (*it == allele_idx)
+          bi_geno_vec[it.offset()] = 1. / denom;
+      }
+
+      savvy::stride_reduce(bi_geno_vec, bi_geno_vec.size() / geno_file.samples().size());
+
+      geno.emplace_back(bi_geno_vec.value_data(), bi_geno_vec.value_data() + bi_geno_vec.non_zero_size(), bi_geno_vec.index_data(), bi_geno_vec.size()); // copy operators not yet overloaded.
     }
-
-    double af = ac / an;
-    double denom = std::sqrt(2. * af * (1. - af));
-    for (auto it = geno.back().begin(); it != geno.back().end(); ++it)
-    {
-      if (std::isnan(*it))
-        *it = af / denom; // mean impute missing
-      else
-        *it = *it / denom;
-    }
-
-    savvy::stride_reduce(geno.back(), geno.back().size() / geno_file.samples().size());
-
-    geno.emplace_back();
   }
-
-  geno.pop_back();
 
   if (geno_file.bad())
     return std::cerr << "Error: read failure\n", false;
@@ -422,70 +428,91 @@ bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_ve
   return true;
 }
 
-bool load_geno_matrix(savvy::reader& geno_file, xt::xtensor<double, 2>& xgeno, bool center)
+bool load_geno_matrix(savvy::reader& geno_file, std::size_t& n_variants, xt::xtensor<double, 2>& xgeno, bool center)
 {
-  std::vector<savvy::compressed_vector<std::int8_t>> geno_matrix(1);
+
+
+//  std::vector<savvy::compressed_vector<std::int8_t>> geno_matrix(1);
+//  savvy::variant var;
+//  while (geno_file >> var)
+//  {
+//    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
+//    if (!var.get_format("GT", geno_matrix.back()))
+//      return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
+//
+////    if (std::isnan(af) || af < min_af || af > max_af)
+////      continue;
+//
+//    geno_matrix.emplace_back();
+////    if (geno_matrix.size() == 101)
+////      break;
+//  }
+//
+//  geno_matrix.pop_back();
+//  xgeno.resize({geno_matrix.size(), geno_file.samples().size()});
+
+  xgeno.resize({n_variants, geno_file.samples().size()});
+  xgeno.fill(0.);
+
+  n_variants = 0;
   savvy::variant var;
+  savvy::compressed_vector<std::int8_t> geno_vec;
   while (geno_file >> var)
   {
-    if (var.alts().size() != 1) continue; // SNPs only. //TODO: Support indels
-    if (!var.get_format("GT", geno_matrix.back()))
+    if (var.alts().size() < 1) continue;
+    if (!var.get_format("GT", geno_vec))
       return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
 
-//    if (std::isnan(af) || af < min_af || af > max_af)
-//      continue;
+    const std::size_t allele_idx = 1;
 
-    geno_matrix.emplace_back();
-//    if (geno_matrix.size() == 101)
-//      break;
+    std::size_t an = geno_vec.size();
+    std::size_t ac = 0;
+    for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+    {
+      if (*it < 0) // missing
+      {
+        --an;
+      }
+      else
+      {
+        // Only first allele is considered when using xtensor matrix. Since record counts from s1r index are unaware of multiallelics.
+        // Could potentially do a first pass wih SAV files (as we do with BCF/VCF) to compute true variant count in order to support other alleles.
+        ac += int(*it == allele_idx);
+      }
+    }
+
+    if (ac == 0 || ac == an) continue; // skipping monomorphic //TODO: log first occurence
+
+    double af = static_cast<double>(ac) / an;
+
+    assert(af > 0. && af < 1.);
+
+
+    std::size_t stride = geno_vec.size() / geno_file.samples().size();
+    for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+    {
+      if (*it < 0)
+        xgeno(n_variants, it.offset() / stride) += af; // mean impute missing
+      else
+        xgeno(n_variants, it.offset() / stride) += double(*it == allele_idx);
+    }
+
+    if (center)
+    {
+      double mean = 2. * af;
+      double denom = std::sqrt(2. * af * (1. - af));
+      for (std::size_t i = 0; i < xgeno.shape(1); ++i)
+      {
+        xgeno(n_variants, i) = (xgeno(n_variants, i) - mean) / denom;
+        assert(!std::isnan(xgeno(n_variants, i)));
+      }
+    }
+
+    ++n_variants;
   }
-
-  geno_matrix.pop_back();
 
   if (geno_file.bad())
     return std::cerr << "Error: read failure\n", false;
-
-  xgeno.resize({geno_matrix.size(), geno_file.samples().size()});
-  xgeno.fill(0.);
-
-  for (std::size_t i = 0; i < geno_matrix.size(); ++i)
-  {
-    std::size_t an = geno_matrix[i].size();
-    double ac{};
-    for (auto jt = geno_matrix[i].begin(); jt != geno_matrix[i].end(); ++jt)
-    {
-      if (*jt < 0) // missing
-        --an;
-      else
-        ac += *jt;
-    }
-
-    double af = ac / an;
-
-    std::size_t stride = geno_matrix[i].size() / geno_file.samples().size();
-    if (an != geno_matrix[i].size())
-    {
-      for (auto jt = geno_matrix[i].begin(); jt != geno_matrix[i].end(); ++jt)
-      {
-        if (*jt < 0)
-          xgeno(i, jt.offset() / stride) += af; // mean impute missing
-        else
-          xgeno(i, jt.offset() / stride) += *jt;
-      }
-    }
-    else
-    {
-      for (auto jt = geno_matrix[i].begin(); jt != geno_matrix[i].end(); ++jt)
-        xgeno(i, jt.offset() / stride) += *jt;
-    }
-
-    double mean = center ? 2. * af : 0.;
-    for (std::size_t j = 0; j < geno_file.samples().size(); ++j)
-    {
-      xgeno(i, j) = (xgeno(i, j) - mean) / std::sqrt(2. * af * (1. - af)); // row normalize
-      assert(!std::isnan(xgeno(i, j)));
-    }
-  }
 
   return true;
 }
@@ -523,15 +550,34 @@ int pca_main(int argc, char** argv)
   }
   else
   {
+    std::size_t n_variants = 0;
+    for (const auto& s : savvy::s1r::stat_index(args.input_path()))
+    {
+      n_variants += s.record_count; // assuming biallelic
+    }
+
+    if (n_variants == 0)
+    {
+      std::cerr << "Reading through file to get variant count (this step is not necessary when using SAV file format)" << std::endl;
+      savvy::variant var;
+      while (geno_file >> var)
+        ++n_variants;
+
+      std::cerr << "Will allocate memory for " << n_variants << " variants" << std::endl;
+      geno_file = savvy::reader(args.input_path());
+      if (!geno_file)
+        return std::cerr << "Error: could not reopen genotype file ("<< args.input_path() << ")\n", EXIT_FAILURE;
+    }
 
     xt::xtensor<double, 2> xgeno;
-    if (!load_geno_matrix(geno_file, xgeno, true))
+    if (!load_geno_matrix(geno_file, n_variants, xgeno, true))
       return std::cerr << "Error: failed loading geno matrix from file\n", EXIT_FAILURE;
 
     auto nipals_complexity = [](std::size_t m, std::size_t n) { return std::size_t(2) * m * n; };
     auto cov_complexity = [](std::size_t m, std::size_t n) { return n * n; };
 
-    std::size_t m = xgeno.shape(0), n = xgeno.shape(1);
+    // load_geno_matrix() updates n_variants
+    std::size_t m = n_variants /*xgeno.shape(0)*/, n = xgeno.shape(1);
     std::cerr << "Loaded " << m << " variants from " << n << " samples" << std::endl;
 
     bool use_cov_mat = args.use_cov_mat() < 0 ? nipals_complexity(m, n) > cov_complexity(m, n) : (bool)args.use_cov_mat();
