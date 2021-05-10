@@ -710,6 +710,94 @@ auto compute_eigen_sparse_centered4(const std::vector<savvy::compressed_vector<S
   return std::make_tuple(eval(diagonal(R)), Q);
 }
 
+template <typename ScalarT, typename CVecT>
+auto compute_eigen_sparse_centered5(const std::vector<savvy::compressed_vector<ScalarT>>& geno_matrix, const CVecT& standardization_vec, std::size_t num_pcs = 10, std::size_t max_iterations = 128, double tolerance = 1e-8)
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  assert(geno_matrix.size());
+
+  xarray<double> Q = random::rand<double>({geno_matrix[0].size(), num_pcs});
+  xarray<double> R;
+  std::tie(Q, R) = qr(Q);
+  xarray<double> Q_prev;
+
+  for (std::size_t i = 0; i < max_iterations; ++i)
+  {
+    Q_prev = Q;
+
+    xarray<double> S = xt::zeros<double>(Q.shape());
+
+    //auto start = std::chrono::steady_clock::now();
+    // ========== //
+    // center right product
+    //xt::xtensor<double, 2> T = xt::xtensor<double, 2>::from_shape({geno_matrix.size(), Q.shape(1)});
+    xt::xtensor<double, 1> col_sum_Q = -xt::sum(Q, {0});
+//    for (std::size_t j = 0; j < T.shape(0); ++j)
+//      xt::row(T, j) = col_sum_Q * standardization_vec[j];
+    // ========== //
+
+    std::vector<double> tmp(Q.shape(1));
+    xt::xtensor<double, 1> left_center_accum = xt::zeros<double>({Q.shape(1)});
+    for (std::size_t j = 0; j < geno_matrix.size(); ++j)
+    {
+      // ========== //
+      // center right product
+      double std_coef = standardization_vec[j];
+      for (std::size_t k = 0; k < Q.shape(1); ++k)
+        tmp[k] = col_sum_Q[k] * std_coef;
+      // ========== //
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &Q(gt.offset(), 0);
+        for (std::size_t k = 0; k < Q.shape(1); ++k)
+        {
+          tmp[k] += *gt * p[k];
+        }
+      }
+
+      // ========== //
+      // accumulate center for left product
+      for (std::size_t k = 0; k < Q.shape(1); ++k)
+        left_center_accum[k] += tmp[k] * std_coef;
+      // ========== //
+
+      for (auto gt = geno_matrix[j].begin(); gt != geno_matrix[j].end(); ++gt)
+      {
+        double* p = &S(gt.offset(), 0);
+        for (std::size_t k = 0; k < S.shape(1); ++k)
+          p[k] += static_cast<double>(*gt) * tmp[k];
+      }
+
+      //std::cerr << S << std::endl;
+    }
+
+    // ========== //
+    // center left product
+    //xt::xtensor<double, 1> temp2 = xt::linalg::dot(standardization_vec, T);
+    //S -= temp2;
+    S -= left_center_accum;
+    // ========== //
+
+    //std::cerr << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count() << "ms" <<  std::endl;
+
+    //std::cerr << S << std::endl;
+    std::tie(Q, R) = qr(S);
+    auto delta = Q - Q_prev;
+    double err = sum(delta * delta)();
+    if (i % 10 == 0 || i + 1 == max_iterations || err < tolerance)
+    {
+      std::cerr << "SSE after iteration " << i << ": " << err << std::endl;
+      if (err < tolerance)
+        break;
+    }
+  }
+
+  return std::make_tuple(eval(diagonal(R)), Q);
+}
+
 bool load_geno_matrix(savvy::reader& geno_file, std::vector<savvy::compressed_vector<double>>& geno, std::vector<double>& centering_vec)
 {
   geno.resize(0);
@@ -865,7 +953,7 @@ int pca_main(int argc, char** argv)
 
     bool center = true;
     if (center)
-      std::tie(eigvals, eigvecs) = compute_eigen_sparse_centered4(geno, xt::adapt(centering_vec), args.num_pcs(), args.max_iterations(), args.tolerance());
+      std::tie(eigvals, eigvecs) = compute_eigen_sparse_centered5(geno, xt::adapt(centering_vec), args.num_pcs(), args.max_iterations(), args.tolerance());
     else
       std::tie(eigvals, eigvecs) = compute_eigen_sparse(geno, args.num_pcs(), args.max_iterations(), args.tolerance());
   }
