@@ -8,6 +8,8 @@
 
 class ridge_regression
 {
+private:
+  xt::xtensor<float, 1> beta_;
 public:
   template <typename VecT, typename MatT>
   void fit(const VecT& y, const MatT& X, double lambda = 1.)
@@ -27,24 +29,24 @@ public:
   }
 
   template <typename VecT, typename MatT>
-  void fit_gd(const VecT& y, const MatT& X, std::size_t max_epochs, double learning_rate, double tolerance, double lambda = 1.)
+  void fit_gd(const VecT& y, const MatT& X, std::size_t max_epochs, typename VecT::value_type learning_rate, typename VecT::value_type tolerance, typename VecT::value_type lambda = 1.)
   {
     using namespace xt;
     using namespace xt::linalg;
 
     std::size_t n = X.shape(0);
 
-    xtensor<double, 1> beta = xt::random::randn<double>({X.shape(1)}, 0., std::sqrt(1. / n));
-    beta(0) = xt::mean(y)();
-    std::cerr << "gd initial beta: " << beta << std::endl;
+    beta_ = xt::random::randn<typename VecT::value_type>({X.shape(1)}, 0., std::sqrt(1. / n));
+    beta_(0) = xt::mean(y)();
+    std::cerr << "gd initial beta: " << beta_ << std::endl;
     for (std::size_t e = 0; e < max_epochs; ++e)
     {
-      auto pred = dot(X, beta);
+      auto pred = dot(X, beta_);
       auto resi = y - pred;
 
-      xtensor<double, 1> reg = ((2./1.) * lambda) * beta;
-      reg[0] = 0.; // Don't penalize intercept
-      auto grad = -(2./n) * dot(transpose(X), resi) + reg;
+      xtensor<typename VecT::value_type, 1> penalty = ((2.f) * lambda) * beta_;
+      penalty[0] = 0.f; // Don't penalize intercept
+      auto grad = (-2.f/n) * dot(transpose(X), resi) + penalty;
       std::size_t not_finite = 0, nan_cnt = 0;
       for (std::size_t i = 0; i < grad.shape(0); ++i)
       {
@@ -62,32 +64,40 @@ public:
 
       //beta = beta - learning_rate * grad;
       auto delta = learning_rate * grad;
-      beta -= delta;
+      beta_ -= delta;
       if (e % 100 == 0)
       {
-        std::cerr << "gd beta after iter " << e << ": " << beta << std::endl;
+        std::cerr << "gd beta after iter " << e << ": " << beta_ << std::endl;
         std::cerr << "mse: " << dot(transpose(resi), resi) / n << std::endl;
       }
       if (false) //xt::all(xt::abs(delta) <= tolerance))
         break;
     }
 
-    auto resi = (y - dot(X, beta));
-    std::cerr << "beta gd: " << beta << std::endl;
-    std::cerr << "pred gd: " << dot(X, beta) << std::endl;
+    auto resi = (y - dot(X, beta_));
+    std::cerr << "beta gd: " << beta_ << std::endl;
+    std::cerr << "pred gd: " << dot(X, beta_) << std::endl;
     std::cerr << "resi gd: " << resi << std::endl;
     std::cerr << "mse: " << dot(transpose(resi), resi) / n << std::endl;
+  }
+
+  template <typename MatT>
+  xt::xtensor<float, 1> predict(const MatT& X)
+  {
+    return xt::linalg::dot(X, beta_);
   }
 };
 
 class whole_genome_model : public linear_model
 {
 public:
-  whole_genome_model(const res_t& y, const cov_t& x_orig, const xt::xtensor<double, 2>& geno_matrix) : linear_model(y, x_orig)
+  whole_genome_model(const res_t& y, const cov_t& x_orig, const xt::xtensor<float, 2>& geno_matrix, std::size_t max_epochs, double learning_rate, double tolerance, double lambda) : linear_model(y, x_orig)
   {
     ridge_regression reg;
 //    reg.fit(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 0.0);
 //    reg.fit(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 1.0);
-    reg.fit_gd(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 10000, 0.0001, 1e-5, 1.0);
+    xt::xtensor<float, 1> y_copy = residuals_; //xt::view(residuals_, xt::range(0, 2504));
+    reg.fit_gd(y_copy/*xt::view(residuals_, xt::range(0, 2504))*/, geno_matrix, max_epochs, learning_rate, tolerance, lambda); // 10000, 0.001, 1e-5, 1.0);
+    residuals_ = reg.predict(geno_matrix) - y_copy;
   }
 };

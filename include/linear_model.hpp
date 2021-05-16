@@ -21,7 +21,7 @@ public:
   typedef double scalar_type;
   typedef xt::xtensor<scalar_type, 1> res_t;
   typedef xt::xtensor<scalar_type, 2> cov_t;
-private:
+protected:
   res_t residuals_;
   scalar_type s_y_;
   scalar_type s_yy_;
@@ -58,6 +58,8 @@ public:
     s_y_ = sum(y)();
     s_yy_ = dot(y, y)();
   }
+
+  virtual ~linear_model() {}
 
   std::size_t sample_size() const { return residuals_.size(); }
 

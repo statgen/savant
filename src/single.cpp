@@ -4,6 +4,7 @@
 #include "utility.hpp"
 #include "linear_model.hpp"
 #include "logistic_score_model.hpp"
+#include "whole_genome_model.hpp"
 
 #include <savvy/reader.hpp>
 #include <xtensor/xarray.hpp>
@@ -422,13 +423,67 @@ int single_main(int argc, char** argv)
   if (false)
     return run_collapse(args, geno_file, linear_model(xresp, xcov));
 
-  if (args.logit_enabled())
+  if (args.whole_genome_file_path().size())
   {
-    return run_single(args, geno_file, logistic_score_model(xresp, xcov));
+    savvy::reader whole_genome_file(args.whole_genome_file_path());
+    if (!whole_genome_file)
+      return std::cerr << "Could not open --wgeno\n", EXIT_FAILURE;
+
+    savvy::variant var;
+    std::size_t i = 0;
+    while (whole_genome_file >> var && i <= 1000/**/)
+      ++i;
+
+    xt::xtensor<float, 2> xgeno = xt::zeros<float>({whole_genome_file.samples().size(), i + 1});
+    xt::col(xgeno, 0) = xt::ones<float>({whole_genome_file.samples().size()});
+
+    whole_genome_file = savvy::reader(args.whole_genome_file_path());
+    if (!whole_genome_file)
+      return std::cerr << "Could not reopen --wgeno\n", EXIT_FAILURE;
+
+    savvy::compressed_vector<float> geno_vec;
+    i = 1;
+    while (whole_genome_file >> var && i <= xgeno.shape(1))
+    {
+      var.get_format("GT", geno_vec);
+
+      std::size_t ploidy = geno_vec.size() / whole_genome_file.samples().size();
+      std::size_t an = geno_vec.size();
+      float ac = 0;
+      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+      {
+        if (std::isnan(*it))
+          --an;
+        else
+          ac += *it;
+      }
+
+      float af = ac / an;
+
+      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+      {
+        if (std::isnan(*it))
+          xgeno(it.offset() / ploidy, i) += af;
+        else
+          xgeno(it.offset() / ploidy, i) += *it;
+      }
+
+      ++i;
+    }
+
+
+    return run_single(args, geno_file, whole_genome_model(xresp, xcov, xgeno, 10000, 0.0001, 1e-5, 1.0));
   }
   else
   {
-    return run_single(args, geno_file, linear_model(xresp, xcov));
+    if (args.logit_enabled())
+    {
+      return run_single(args, geno_file, logistic_score_model(xresp, xcov));
+    }
+    else
+    {
+      return run_single(args, geno_file, linear_model(xresp, xcov));
+    }
   }
 
   // gzip -cd sp-reg-results-chr19-ldl.tsv | tail -n+2 | awk -F'\t' '$4>5  {print $2"\t"$8}' | gnuplot --persist -e "set logscale y; set yrange [0.99:5e-32] reverse; set xrange [1:65000000]; plot '-' using 1:2 w points"

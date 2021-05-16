@@ -29,6 +29,7 @@ private:
   std::string pheno_path_;
   std::string output_path_ = "/dev/stdout";
   std::string debug_log_path_ = "/dev/stdnull";
+  std::string wgeno_file_path_;
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
   double min_mac_ = 1.0;
@@ -56,6 +57,7 @@ public:
         {"pheno", required_argument, 0, 'p'},
         {"region", required_argument, 0, 'r'},
         {"trust-info", no_argument, 0, '\x01'},
+        {"wgeno", required_argument, 0, '\x02'},
         {0, 0, 0, 0}
       })
   {
@@ -86,6 +88,7 @@ public:
   const std::string& output_path() const { return output_path_; }
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
+  const std::string& whole_genome_file_path() const { return wgeno_file_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   double min_mac() const { return min_mac_; }
   bool sparse_disabled() const { return no_sparse_; }
@@ -134,6 +137,7 @@ public:
     os << "     --fmt-field      Format field to use (DS, HDS, or GT)\n";
     os << "     --debug-log      Enables debug logging and specifies log file\n";
     os << "     --trust-info     Uses AC and AN INFO fields instead of computing values\n";
+    os << "     --wgeno          Path to thinned genotypes used for fitting whole genome model\n";
     os << std::flush;
   }
 
@@ -180,6 +184,10 @@ public:
         else if (std::string("debug-log") == long_options_[long_index].name)
         {
           debug_log_path_ = optarg ? optarg : "";
+        }
+        else if (std::string("wgeno") == long_options_[long_index].name)
+        {
+          wgeno_file_path_ = optarg ? optarg : "";
         }
         else
         {
