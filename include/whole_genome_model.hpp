@@ -39,6 +39,8 @@ public:
     beta_ = xt::random::randn<typename VecT::value_type>({X.shape(1)}, 0., std::sqrt(1. / n));
     beta_(0) = xt::mean(y)();
     std::cerr << "gd initial beta: " << beta_ << std::endl;
+    decltype(beta_) beta_prev = beta_;
+    double prev_mse = std::numeric_limits<double>::max();
     for (std::size_t e = 0; e < max_epochs; ++e)
     {
       auto pred = dot(X, beta_);
@@ -67,11 +69,28 @@ public:
       beta_ -= delta;
       if (e % 100 == 0)
       {
+        double mse = (dot(transpose(resi), resi) / n)();
+        if (e > 0 && ((mse - prev_mse) > 1e-10 || !std::isfinite(mse)))
+        {
+          beta_ = beta_prev;
+          learning_rate = learning_rate / 10.;
+          std::cerr << "Resetting betas and decreasing learning rate to " << learning_rate << std::endl;
+        }
+        else
+        {
+          beta_prev = beta_;
+          learning_rate += learning_rate * 0.01;
+          prev_mse = mse;
+          std::cerr << "Increasing learning rate to " << learning_rate << std::endl;
+        }
         std::cerr << "gd beta after iter " << e << ": " << beta_ << std::endl;
         std::cerr << "mse: " << dot(transpose(resi), resi) / n << std::endl;
       }
-      if (false) //xt::all(xt::abs(delta) <= tolerance))
+      if (learning_rate < 1e-16) //xt::all(xt::abs(delta) <= tolerance))
+      {
+        std::cerr << "Stopping early" << std::endl;
         break;
+      }
     }
 
     auto resi = (y - dot(X, beta_));
