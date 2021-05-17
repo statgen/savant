@@ -459,13 +459,16 @@ int single_main(int argc, char** argv)
       }
 
       float af = ac / an;
-
-      for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+      float denom = std::sqrt(2. * af * (1. - af));
+      if (denom > 0.f)
       {
-        if (std::isnan(*it))
-          xgeno(it.offset() / ploidy, i) += af;
-        else
-          xgeno(it.offset() / ploidy, i) += *it;
+        for (auto it = geno_vec.begin(); it != geno_vec.end(); ++it)
+        {
+          if (std::isnan(*it))
+            xgeno(it.offset() / ploidy, i) += af / denom;
+          else
+            xgeno(it.offset() / ploidy, i) += *it / denom;
+        }
       }
 
       ++i;
