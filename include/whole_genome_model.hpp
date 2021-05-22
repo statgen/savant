@@ -116,7 +116,7 @@ public:
 //    reg.fit(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 0.0);
 //    reg.fit(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 1.0);
     xt::xtensor<float, 1> y_copy = residuals_; //xt::view(residuals_, xt::range(0, 2504));
-    reg.fit_gd(y_copy/*xt::view(residuals_, xt::range(0, 2504))*/, geno_matrix, max_epochs, learning_rate, tolerance, lambda); // 10000, 0.001, 1e-5, 1.0);
+    reg.fit_gd(xt::view(y_copy, xt::range(0, 2504))/**/, geno_matrix, max_epochs, learning_rate, tolerance, lambda); // 10000, 0.001, 1e-5, 1.0);
     residuals_ = reg.predict(geno_matrix) - y_copy;
   }
 };

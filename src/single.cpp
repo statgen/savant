@@ -5,6 +5,7 @@
 #include "linear_model.hpp"
 #include "logistic_score_model.hpp"
 #include "whole_genome_model.hpp"
+#include "mixed_effects_model.hpp"
 
 #include <savvy/reader.hpp>
 #include <xtensor/xarray.hpp>
@@ -136,7 +137,7 @@ bool parse_pheno_file(const single_prog_args& args, phenotype_file_data& dest)
   return true;
 }
 
-bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt::xtensor<scalar_type, 1>& pheno_vec, xt::xtensor<scalar_type, 2>& cov_mat)
+bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt::xtensor<scalar_type, 1>& pheno_vec, xt::xtensor<scalar_type, 2>& cov_mat, std::vector<std::string>& sample_intersection)
 {
   phenotype_file_data full_pheno;
   if (!parse_pheno_file(args, full_pheno))
@@ -162,7 +163,7 @@ bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt:
     }
   }
 
-  auto sample_intersection = geno_file.subset_samples(samples_with_phenotypes);
+  sample_intersection = geno_file.subset_samples(samples_with_phenotypes);
 
   pheno_vec = xt::xtensor<scalar_type, 1>::from_shape({sample_intersection.size()});
   cov_mat = xt::xtensor<scalar_type, 2>::from_shape({sample_intersection.size(), args.cov_columns().size()});
@@ -415,14 +416,16 @@ int single_main(int argc, char** argv)
   if (!args.update_fmt_field(geno_file))
     return EXIT_FAILURE;
 
+  std::vector<std::string> sample_intersection;
   xt::xtensor<scalar_type, 1> xresp;
   xt::xtensor<scalar_type, 2> xcov;
-  if (!load_phenotypes(args, geno_file, xresp, xcov))
+  if (!load_phenotypes(args, geno_file, xresp, xcov, sample_intersection))
     return std::cerr << "Could not load phenotypes\n", EXIT_FAILURE;
 
   if (false)
     return run_collapse(args, geno_file, linear_model(xresp, xcov));
 
+  std::string kinship_file_path = ""; //"../test-data/ukb_allchr_v2_100000markers.fixed_ids.kin0";
   if (args.whole_genome_file_path().size())
   {
     savvy::reader whole_genome_file(args.whole_genome_file_path());
@@ -431,7 +434,7 @@ int single_main(int argc, char** argv)
 
     savvy::variant var;
     std::size_t i = 0;
-    while (whole_genome_file >> var && i <= 1000/**/)
+    while (whole_genome_file >> var /*&& i <= 1000*/)
       ++i;
 
     xt::xtensor<float, 2> xgeno = xt::zeros<float>({whole_genome_file.samples().size(), i + 1});
@@ -476,6 +479,75 @@ int single_main(int argc, char** argv)
 
 
     return run_single(args, geno_file, whole_genome_model(xresp, xcov, xgeno, 10000, 0.0001, 1e-5, 1.0));
+  }
+  else if (kinship_file_path.size())
+  {
+//    xt::xtensor<float, 1> a = {0.f, 1.0002f, 0.9f, 0.f};
+//    xt::xtensor<float, 1> b = {0.f, 0.9f, 1.001f, 0.f};
+//    std::cerr << xt::linalg::dot(a - xt::mean(a), b - xt::mean(b)) << std::endl;
+//    auto cov_a_b = xt::linalg::dot(a - xt::mean(a), b - xt::mean(b)) / a.size();
+//    float r = (cov_a_b / std::sqrt(xt::variance(a)() * xt::variance(b)()))();
+
+
+//    xt::xtensor<float, 2> X = {
+//      {0.f, 1.f, 1.f, 0.f, 1.f},
+//      {1.f, 1.f, 0.f, 0.f, 2.f},
+//      {0.f, 2.f, 0.f, 0.f, 0.f},
+//      {0.f, 2.f, 0.f, 2.f, 1.f},
+//      {2.f, 0.f, 1.f, 0.f, 0.f},
+//      {1.f, 0.f, 0.f, 2.f, 2.f},
+//      {1.f, 2.f, 0.f, 0.f, 1.f},
+//      {1.f, 0.f, 0.f, 2.f, 1.f},
+//      {0.f, 2.f, 0.f, 0.f, 0.f},
+//    };
+//
+//    xt::xtensor<float, 2> X_norm = (X - xt::mean(X)) / xt::variance(X);
+//    xt::xtensor<float, 2> A = xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(1);
+//    std::cerr << A << std::endl;
+//    A += 0.00001 * xt::eye(A.shape(0));
+//    float d = xt::linalg::det(A);
+//    xt::linalg::cholesky(A);
+
+//    std::cerr << "X_norm: " << X_norm << std::endl;
+//    std::cerr << "XtX: " << xt::linalg::dot(xt::transpose(X), X) << std::endl;
+//    std::cerr << "XntXn: " << xt::linalg::dot(xt::transpose(X_norm), X_norm) << std::endl;
+//    std::cerr << "XntXn/Xdim0: " << xt::linalg::dot(xt::transpose(X_norm), X_norm) / X.shape(0) << std::endl;
+    //std::cerr << "chol: " << xt::linalg::cholesky(xt::linalg::dot(xt::transpose(X_norm), X_norm) / X.shape(0)) << std::endl;
+//    std::cerr << "----------------------" << std::endl;
+//    std::cerr << "X_norm: " << X_norm << std::endl;
+//    std::cerr << "XntXn: " << xt::linalg::dot(X_norm, xt::transpose(X_norm)) << std::endl;
+//    std::cerr << "XntXn/Xdim0: " << xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(0) << std::endl;
+//    std::cerr << "chol: " << xt::linalg::cholesky(xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(0)) << std::endl;
+//    std::cerr << "----------------------" << std::endl;
+//    X_norm = (X - xt::mean(X, {0})) / xt::stddev(X, {0});
+//    std::cerr << "mean/stddev: " << xt::mean(X, {0}) << " / " << xt::stddev(X, {0}) << std::endl;
+//    std::cerr << "XntXn/Xdim0: " << xt::linalg::dot(xt::transpose(X_norm), X_norm) / X.shape(0) << std::endl;
+//    std::cerr << "chol: " << xt::linalg::cholesky(xt::linalg::dot(xt::transpose(X_norm), X_norm) / X.shape(0)) << std::endl;
+//    std::cerr << "----------------------" << std::endl;
+//    std::cerr << "BOLT-LMM" << std::endl;
+//    X_norm = ((X - xt::mean(X, {0})) / xt::stddev(X, {0}));
+//    std::cerr << "mean/stddev: " << xt::mean(X, {0}) << " / " << xt::stddev(X, {0}) << std::endl;
+//    std::cerr << "XnXnt/Xdim0: " << xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(1) << std::endl;
+//    std::cerr << "chol: " << xt::linalg::cholesky(xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(1)) << std::endl;
+//    std::cerr << "----------------------" << std::endl;
+//    X_norm = (X) / xt::stddev(X, {0});
+//    std::cerr << "stddev: " << xt::stddev(X, {0}) << std::endl;
+//    std::cerr << "XntXn/Xdim0: " << xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(1) << std::endl;
+//    std::cerr << "chol: " << xt::linalg::cholesky(xt::linalg::dot(X_norm, xt::transpose(X_norm)) / X.shape(1)) << std::endl;
+
+
+
+    Eigen::Map<Eigen::VectorXd> mapped_resp(xresp.data(), xresp.size());
+    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> mapped_cov(xcov.data(), xcov.shape(0), xcov.shape(1));
+    Eigen::SparseMatrix<double> kinship(xresp.size(), xresp.size());
+    if (!mixed_effects_model::load_kinship(kinship_file_path, kinship, sample_intersection))
+      return std::cerr << "Error: could not load kinship\n", EXIT_FAILURE;
+
+    std::vector<savvy::compressed_vector<float>> grammar_genotypes;
+    if (!mixed_effects_model::load_grammar_variants(geno_file, args.fmt_field(), mapped_resp, grammar_genotypes))
+      return std::cerr << "Error: could not load grammar variants\n", EXIT_FAILURE;
+
+    return run_single(args, geno_file, mixed_effects_model(mapped_resp, mapped_cov, kinship, grammar_genotypes));
   }
   else
   {
