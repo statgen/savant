@@ -118,7 +118,7 @@ bool parse_pheno_file(const single_prog_args& args, phenotype_file_data& dest)
           scalar_type v = std::strtod(str_fields[i].c_str(), &p);
           if (p == str_fields[i].c_str() && !str_fields[i].empty() && str_fields[i][0] != '.' && std::tolower(str_fields[i][0]) != 'n')
             return std::cerr << "Error: encountered non-numeric phenotype\n", false;
-          else
+          else if (p != str_fields[i].c_str())
             dest.resp_data.back() = v;
         }
         else if (mask[i] == cov_code)
@@ -126,7 +126,7 @@ bool parse_pheno_file(const single_prog_args& args, phenotype_file_data& dest)
           scalar_type v = std::strtod(str_fields[i].c_str(), &p);
           if (p == str_fields[i].c_str() && !str_fields[i].empty() && str_fields[i][0] != '.' && std::tolower(str_fields[i][0]) != 'n')
             return std::cerr << "Error: encountered non-numeric covariate\n", false;
-          else
+          else if (p != str_fields[i].c_str())
             dest.cov_data.back()[j] = v;
           ++j;
         }
@@ -151,7 +151,7 @@ bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt:
   id_map.reserve(full_pheno.ids.size());
   for (std::size_t i = 0; i < full_pheno.resp_data.size(); ++i)
   {
-    if (std::isnan(full_pheno.resp_data[i]) /*|| std::find_if(covariate_data[i].begin(); covariate_data[i].end(), std::isnan) != covariate_data[i].end())*/)
+    if (std::isnan(full_pheno.resp_data[i]) || std::find_if(full_pheno.cov_data[i].begin(), full_pheno.cov_data[i].end(), std::isnan<scalar_type>) != full_pheno.cov_data[i].end())
     {
       // missing
 
@@ -178,6 +178,62 @@ bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt:
   return true;
 }
 
+template <typename T>
+typename std::enable_if<std::is_floating_point<typename T::value_type>::value, std::tuple<double, std::int64_t>>::type
+generate_ac_an(const T& genos)
+{
+  double ac = 0.;
+  std::int64_t an = genos.size();
+  for (auto it = genos.begin(); it != genos.end(); ++it)
+  {
+    if (std::isnan(*it))
+      --an;
+    else
+      ac++;
+  }
+
+  return {ac, an};
+}
+
+template <typename T>
+typename std::enable_if<std::is_integral<typename T::value_type>::value, std::tuple<double, std::int64_t>>::type
+generate_ac_an(const T& genos)
+{
+  double ac = 0.;
+  std::int64_t an = genos.size();
+  for (auto it = genos.begin(); it != genos.end(); ++it)
+  {
+    if (*it < 0)
+      --an;
+    else
+      ac += *it;
+  }
+
+  return {ac, an};
+}
+
+template <typename T>
+typename std::enable_if<std::is_floating_point<typename T::value_type>::value, void>::type
+mean_impute(T& genos, typename T::value_type mean)
+{
+  for (auto it = genos.begin(); it != genos.end(); ++it)
+  {
+    if (std::isnan(*it))
+      *it = mean;
+  }
+}
+
+template <typename T>
+typename std::enable_if<std::is_integral<typename T::value_type>::value, void>::type
+mean_impute(T& genos, typename T::value_type mean)
+{
+  for (auto it = genos.begin(); it != genos.end(); ++it)
+  {
+    if (*it < 0)
+      *it = mean > 0.5 ? 1 : 0;
+  }
+}
+
 template <typename ModelT>
 int run_single(const single_prog_args& args, savvy::reader& geno_file, const ModelT& mdl)
 {
@@ -192,6 +248,10 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
   while (geno_file >> var)
   {
     std::size_t ploidy = 0;
+    std::int64_t an = 0;
+    std::int64_t missing_cnt = 0;
+    float ac = 0.;
+    float af = 0.;
     bool is_sparse = false;
     bool found = false;
     for (const auto& f : var.format_fields())
@@ -203,6 +263,13 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
         is_sparse ? f.second.get(sparse_geno) : f.second.get(dense_geno);
         ploidy = is_sparse ? sparse_geno.size() / mdl.sample_size() : dense_geno.size() / mdl.sample_size();
         assert(is_sparse ? sparse_geno.size() % mdl.sample_size() == 0 : dense_geno.size() % mdl.sample_size() == 0);
+        if (!args.trust_info() || mdl.sample_size() != geno_file.samples().size() || !var.get_info("AC", ac) || !var.get_info("AN", an) || an == 0)
+          std::tie(ac, an) = is_sparse ? generate_ac_an(sparse_geno) : generate_ac_an(dense_geno);
+        af = ac / float(an);
+        missing_cnt = std::int64_t(is_sparse ? sparse_geno.size() : dense_geno.size()) - an;
+        assert(std::int64_t(missing_cnt) >= 0);
+        if (missing_cnt > 0)
+          is_sparse ? mean_impute(sparse_geno, af) : mean_impute(dense_geno, af);
         is_sparse ? savvy::stride_reduce(sparse_geno, ploidy) : savvy::stride_reduce(dense_geno, ploidy);
         break;
       }
@@ -216,32 +283,13 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
 
     assert(ploidy != 0);
 
-    float ac = 0.f, af = 0.f;
-    std::int64_t an = 0;
-    // For now, we are pulling from INFO fields but will likely always compute AC (along with case/ctrl AC) in the future.
-    if (args.trust_info() && mdl.sample_size() == geno_file.samples().size() && var.get_info("AC", ac) && var.get_info("AN", an) && an > 0)
-    {
-      af = float(ac) / an;
-    }
-    else //if (!var.get_info("AF", af))
-    {
-      // For computing ac and af we use AN of sample subset.
-      an = mdl.sample_size() * ploidy;
-      ac = is_sparse ? std::accumulate(sparse_geno.begin(), sparse_geno.end(), 0.f) : std::accumulate(dense_geno.begin(), dense_geno.end(), 0.f);
-      af = ac / an;
-    }
-    //else
-    //{
-    //  an = (geno_file.samples().size() * ploidy);
-    //  ac = af * an;
-    //}
+    float mac = (ac > (an/2.f) ? an - ac : ac);
+    float maf = (af > 0.5f ? 1.f - af : af);
 
-    float mac = (ac > (an/2) ? an - ac : ac);
-    float maf = (af > 0.5 ? 1.f - af : af);
-
+    if (an == 0) continue;
     if (mac < args.min_mac()) continue;
 
-    auto stats = is_sparse ? mdl.test_single(sparse_geno, ac) : mdl.test_single(dense_geno, ac);
+    auto stats = is_sparse ? mdl.test_single(sparse_geno, ac + missing_cnt * af) : mdl.test_single(dense_geno, ac + missing_cnt * af);
     output_file << var.chromosome()
                 << "\t" << var.position()
                 << "\t" << maf
@@ -425,7 +473,7 @@ int single_main(int argc, char** argv)
   if (false)
     return run_collapse(args, geno_file, linear_model(xresp, xcov));
 
-  std::string kinship_file_path = ""; //"../test-data/ukb_allchr_v2_100000markers.fixed_ids.kin0";
+  std::string kinship_file_path = "../test-data/ukb_allchr_v2_100000markers.fixed_ids.kin0";
   if (args.whole_genome_file_path().size())
   {
     savvy::reader whole_genome_file(args.whole_genome_file_path());
@@ -543,11 +591,14 @@ int single_main(int argc, char** argv)
     if (!mixed_effects_model::load_kinship(kinship_file_path, kinship, sample_intersection))
       return std::cerr << "Error: could not load kinship\n", EXIT_FAILURE;
 
+
     std::vector<savvy::compressed_vector<float>> grammar_genotypes;
     if (!mixed_effects_model::load_grammar_variants(geno_file, args.fmt_field(), mapped_resp, grammar_genotypes))
       return std::cerr << "Error: could not load grammar variants\n", EXIT_FAILURE;
 
-    return run_single(args, geno_file, mixed_effects_model(mapped_resp, mapped_cov, kinship, grammar_genotypes));
+    geno_file.reset_bounds(0);
+
+    return run_single(args, geno_file, mixed_effects_model(mapped_resp, mapped_cov, kinship, grammar_genotypes, sample_intersection));
   }
   else
   {
