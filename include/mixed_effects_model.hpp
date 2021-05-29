@@ -266,8 +266,8 @@ public:
     for (auto it = x.begin(); it != x.end(); ++it)
       xvec[it.offset()] = *it;
     double mean = s_x / x.size();
-    double sd = mean * (1. - (mean/ploidy));
-    double scale = 1. / std::sqrt(sd);
+    double sd = std::sqrt(mean * (1. - (mean/ploidy)));
+    double scale = 1. / sd;
     double real_sd = std::sqrt((xvec.array() - mean).square().sum()/(xvec.size()-0));
     double real_scale = 1. / real_sd;
 
@@ -287,9 +287,13 @@ public:
     {
       double mean = s_x / x.size();
       double sd = std::sqrt(mean * (1. - (mean/ploidy)));
+//      double real_sd = x.non_zero_size() * square(0. - mean);
+//      for (auto it = x.begin(); it != x.end(); ++it)
+//        real_sd += square(*it - mean);
+//      real_sd = std::sqrt(real_sd / x.size());
       double scale = 1. / sd;
       numerator = -mean * scale * residuals_sum_;
-      denominator = -2 * mean * scale * s_x * scale + square(mean * scale) * x.size(); // (x - m)(x - m) == (xx - 2mx + mm)
+      denominator = -2.0 * mean * scale * s_x * scale + square(mean * scale) * x.size(); // (x - m)(x - m) == (xx - 2mx + mm)
       for (auto it = x.begin(); it != x.end(); ++it) // ((x - m)/d)((x - m)/d) == (x/d - m/d)(x/d - m/d) == ((x/d)(x/d) - 2(m/d)(x/d) + (m/d)(m/d))
       {
         assert(!std::isnan(*it));
@@ -316,7 +320,7 @@ public:
     scalar_type chi_square_2 = square(numerator) / (denominator * gamma_);
 
     boost::math::chi_squared_distribution<scalar_type> dist(1.f);
-    ret.pvalue = boost::math::cdf(boost::math::complement(dist, chi_square));
+    ret.pvalue = chi_square > 0 ? boost::math::cdf(boost::math::complement(dist, chi_square)) : std::numeric_limits<scalar_type>::quiet_NaN();
     ret.beta = beta;
     ret.se = beta_se;
     ret.chi_square = chi_square;
@@ -445,7 +449,8 @@ public:
     savvy::variant var;
     while (i < 1000 && geno_file >> var)
     {
-      auto& cur_genos = grammar_genotypes.emplace_back();
+      grammar_genotypes.emplace_back();
+      auto& cur_genos = grammar_genotypes.back();
       var.get_format(fmt_field, cur_genos);
 
       std::size_t an = cur_genos.size();

@@ -30,6 +30,7 @@ private:
   std::string output_path_ = "/dev/stdout";
   std::string debug_log_path_ = "/dev/stdnull";
   std::string wgeno_file_path_;
+  std::string kinship_file_path_;
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
   double min_mac_ = 1.0;
@@ -48,6 +49,7 @@ public:
         {"fmt-field", required_argument, 0, '\x02'},
         {"help", no_argument, 0, 'h'},
         {"id", required_argument, 0, 'i'},
+        {"kinship", required_argument, 0, 'k'},
         {"logit", no_argument, 0, 'b'},
         {"min-mac", required_argument, 0, '\x02'},
         {"never-sparse", no_argument, 0, '\x01'},
@@ -89,6 +91,7 @@ public:
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
   const std::string& whole_genome_file_path() const { return wgeno_file_path_; }
+  const std::string& kinship_file_path() const { return kinship_file_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   double min_mac() const { return min_mac_; }
   bool sparse_disabled() const { return no_sparse_; }
@@ -127,6 +130,7 @@ public:
     os << " -c, --cov            Comma separated list of covariate columns\n";
     os << " -h, --help           Print usage\n";
     os << " -i, --id             Sample ID column (defaults to first column)\n";
+    os << " -k, --kinship        Kinship file\n";
     os << " -b, --logit          Enable logistic model\n";
     os << " -o, --output         Output path (default: /dev/stdout)\n";
     os << " -p, --pheno          Phenotype column\n";
@@ -200,6 +204,9 @@ public:
       case 'h':
         help_ = true;
         return true;
+      case 'k':
+        kinship_file_path_ = optarg ? optarg : "";
+        break;
       case 'c':
         covariate_fields_ = utility::split_string_to_vector(optarg ? optarg : "", ',');
         break;
