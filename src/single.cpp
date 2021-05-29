@@ -151,7 +151,7 @@ bool load_phenotypes(const single_prog_args& args, savvy::reader& geno_file, xt:
   id_map.reserve(full_pheno.ids.size());
   for (std::size_t i = 0; i < full_pheno.resp_data.size(); ++i)
   {
-    if (std::isnan(full_pheno.resp_data[i]) || std::find_if(full_pheno.cov_data[i].begin(), full_pheno.cov_data[i].end(), std::isnan<scalar_type>) != full_pheno.cov_data[i].end())
+    if (std::isnan(full_pheno.resp_data[i]) || std::find_if(full_pheno.cov_data[i].begin(), full_pheno.cov_data[i].end(), [](scalar_type v) { return std::isnan(v); }) != full_pheno.cov_data[i].end())
     {
       // missing
 
@@ -189,10 +189,10 @@ generate_ac_an(const T& genos)
     if (std::isnan(*it))
       --an;
     else
-      ac++;
+      ac += *it;
   }
 
-  return {ac, an};
+  return std::make_tuple(ac, an);
 }
 
 template <typename T>
@@ -209,7 +209,7 @@ generate_ac_an(const T& genos)
       ac += *it;
   }
 
-  return {ac, an};
+  return std::make_tuple(ac, an);
 }
 
 template <typename T>
@@ -473,7 +473,6 @@ int single_main(int argc, char** argv)
   if (false)
     return run_collapse(args, geno_file, linear_model(xresp, xcov));
 
-  std::string kinship_file_path = "../test-data/ukb_allchr_v2_100000markers.fixed_ids.kin0";
   if (args.whole_genome_file_path().size())
   {
     savvy::reader whole_genome_file(args.whole_genome_file_path());
@@ -528,7 +527,7 @@ int single_main(int argc, char** argv)
 
     return run_single(args, geno_file, whole_genome_model(xresp, xcov, xgeno, 10000, 0.0001, 1e-5, 1.0));
   }
-  else if (kinship_file_path.size())
+  else if (args.kinship_file_path().size())
   {
 //    xt::xtensor<float, 1> a = {0.f, 1.0002f, 0.9f, 0.f};
 //    xt::xtensor<float, 1> b = {0.f, 0.9f, 1.001f, 0.f};
@@ -588,7 +587,7 @@ int single_main(int argc, char** argv)
     Eigen::Map<Eigen::VectorXd> mapped_resp(xresp.data(), xresp.size());
     Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> mapped_cov(xcov.data(), xcov.shape(0), xcov.shape(1));
     Eigen::SparseMatrix<double> kinship(xresp.size(), xresp.size());
-    if (!mixed_effects_model::load_kinship(kinship_file_path, kinship, sample_intersection))
+    if (!mixed_effects_model::load_kinship(args.kinship_file_path(), kinship, sample_intersection))
       return std::cerr << "Error: could not load kinship\n", EXIT_FAILURE;
 
 
