@@ -385,17 +385,114 @@ int plot_pca_main(int argc, char** argv)
   return EXIT_SUCCESS;
 }
 
+class plot_qq_prog_args
+{
+private:
+  std::vector<option> long_options_;
+  std::string input_path_;
+  std::string custom_plot_commands_;
+  std::string output_path_ = "/dev/stdout";
+  int n_bins_ = 5;
+  bool help_ = false;
+public:
+  plot_qq_prog_args() :
+    long_options_(
+      {
+        {"gnuplot-opts", required_argument, 0, 'g'},
+        {"help", no_argument, 0, 'h'},
+        {"output", required_argument, 0, 'o'},
+        {"pcs", required_argument, 0, 'p'},
+        {0, 0, 0, 0}
+      })
+  {
+  }
+
+  const std::string& input_path() const { return input_path_; }
+  const std::string& output_path() const { return output_path_; }
+  const std::string& custom_plot_commands() const { return custom_plot_commands_; }
+
+  int n_bins() const { return n_bins_; }
+  bool help_is_set() const { return help_; }
+
+  void print_usage(std::ostream& os)
+  {
+    os << "Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>] \n";
+    os << "\n";
+    os << " -g, --gnuplot-opts  Custom gnuplot commands to include\n";
+    os << " -h, --help          Print usage\n";
+    os << " -o, --output        Output path (default: /dev/stdout)\n";
+    os << " -b, --bins          Max number of bins (default: 5)\n";
+    os << std::flush;
+  }
+
+  bool parse(int argc, char** argv)
+  {
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, "g:ho:b:", long_options_.data(), &long_index )) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case 'g':
+        custom_plot_commands_ = optarg ? optarg : "";
+        custom_plot_commands_.erase(custom_plot_commands_.find_last_not_of(" \t\r\n;") + 1);
+        custom_plot_commands_ += "; ";
+        break;
+      case 'h':
+        help_ = true;
+        return true;
+      case 'o':
+        output_path_ = optarg ? optarg : "";
+        break;
+      case 'b':
+        n_bins_ = std::atoi(optarg ? optarg : "");
+        break;
+      default:
+        return false;
+      }
+    }
+
+    int remaining_arg_count = argc - optind;
+
+    if (remaining_arg_count == 1)
+    {
+      input_path_ = argv[optind];
+    }
+    else if (remaining_arg_count < 1)
+    {
+      std::cerr << "Too few arguments\n";
+      return false;
+    }
+    else
+    {
+      std::cerr << "Too many arguments\n";
+      return false;
+    }
+
+    return true;
+  }
+};
+
 int plot_qq_main(int argc, char** argv)
 {
-  if (argc < 2)
-    return std::cerr << "Error: missing argument (path to results file)\n", EXIT_FAILURE;
+  plot_qq_prog_args args;
+  if (!args.parse(argc, argv))
+  {
+    args.print_usage(std::cerr);
+    return EXIT_FAILURE;
+  }
 
-  std::string results_file_path = argv[1];
+  if (args.help_is_set())
+  {
+    args.print_usage(std::cout);
+    return EXIT_SUCCESS;
+  }
 
   std::string line;
-  shrinkwrap::gz::istream results_file(results_file_path);
+  shrinkwrap::gz::istream results_file(args.input_path());
   if (!results_file || !std::getline(results_file, line))
-    return std::cerr << "Error: could not open results file ("<< results_file_path << ")\n", EXIT_FAILURE;
+    return std::cerr << "Error: could not open results file ("<< args.input_path() << ")\n", EXIT_FAILURE;
 
 
   auto fields = utility::split_string_to_vector(line, '\t');
@@ -417,29 +514,84 @@ int plot_qq_main(int argc, char** argv)
   if (maf_idx == fields.size())
     return std::cerr << "Error: 'maf' missing from header line\n", EXIT_FAILURE;
 
-  struct datum
-  {
-    double maf;
-    double pval;
-    datum(double m, double p) : maf(m), pval(p) {}
-  };
+//  struct datum
+//  {
+//    double maf;
+//    double pval;
+//    datum(double m, double p) : maf(m), pval(p) {}
+//  };
 
-  std::vector<datum> pvalues;
+  char tmpl[] = "/tmp/tmp_savant_XXXXXX";
+  std::string temp_prefix = mkdtemp(tmpl); //std::tmpnam(nullptr);
+  std::cerr << "Created temp directory " << temp_prefix << std::endl;
+  temp_prefix += '/';
+
+//  std::vector<datum> pvalues;
+  std::vector<std::vector<double>> group_pvalues(args.n_bins());
   while (std::getline(results_file, line))
   {
     fields = utility::split_string_to_vector(line, '\t');
 
     if (pval_idx >= fields.size())
-      return std::cerr << "Error: number of columns do not match header line at line " << (pvalues.size() + 2) << std::endl, EXIT_FAILURE;
+      return std::cerr << "Error: number of columns do not match header line" << std::endl, EXIT_FAILURE;
 
-    pvalues.emplace_back(std::atof(fields[maf_idx].c_str()), std::atof(fields[pval_idx].c_str())); // TODO: handle parse failure.
+//    pvalues.emplace_back(std::atof(fields[maf_idx].c_str()), std::atof(fields[pval_idx].c_str())); // TODO: handle parse failure.
+
+    auto a = -std::log10(std::atof(fields[maf_idx].c_str()));
+    int maf_group = std::min<int>(args.n_bins(), int(a) + 1);
+    assert(maf_group >= 1);
+    group_pvalues[maf_group - 1].emplace_back(std::atof(fields[pval_idx].c_str()));
+
 //    if (pvalues.size() > 500)
 //      break;
   }
 
-  std::sort(pvalues.begin(), pvalues.end(), [](const auto& l, const auto& r) { return l.pval < r.pval; });
+//  std::sort(pvalues.begin(), pvalues.end(), [](const auto& l, const auto& r) { return l.pval < r.pval; });
+  for (auto it = group_pvalues.begin(); it != group_pvalues.end(); ++it)
+    std::sort(it->begin(), it->end(), [](const auto& l, const auto& r) { return l < r; });
 
+  std::vector<std::string> temp_file_names(args.n_bins());
+  std::vector<std::ofstream> temp_files(args.n_bins());
+  for (std::size_t i = 0; i < group_pvalues.size(); ++i)
+  {
+    temp_file_names[i] = (temp_prefix + std::to_string(i) + ".tsv");
+    temp_files[i] = std::ofstream(temp_file_names[i]);
+  }
 
+  for (std::size_t i = 0; i < group_pvalues.size(); ++i)
+  {
+    int j = 0;
+    for (auto p : group_pvalues[i])
+    {
+      temp_files[i] << -std::log10( (1. + j++) / group_pvalues[i].size()) << "\t" << -log10(p) << "\n";
+    }
+  }
+
+  std::stringstream plot_cmd;
+  plot_cmd << "gnuplot --persist -e \"";
+  if (args.custom_plot_commands().size())
+    plot_cmd << args.custom_plot_commands();
+  plot_cmd << "set key bottom right; ";
+  plot_cmd << "plot '" + temp_file_names[0] + "' using 1:2 with points pt 6 lc 1 title 'MAF <= 0.5' ";
+
+  for (std::size_t i = 1; i < args.n_bins(); ++i)
+    plot_cmd << ", '" + temp_file_names[i] + "' using 1:2 with points pt 6 lc " << (i + 1) << " title 'MAF <= " << std::pow(10., -int(i)) << "' ";
+  plot_cmd << ", x lc 'gray' notitle \"";
+  std::cerr << plot_cmd.str() << std::endl;
+
+  std::FILE* pipe = popen(plot_cmd.str().c_str(), "w");
+  if (!pipe)
+    return perror("popen"), EXIT_FAILURE;
+  pclose(pipe);
+
+  for (const auto& t: temp_file_names)
+    std::remove(t.c_str());
+  //std::remove((temp_prefix + "settings.gnu").c_str());
+
+  if (::rmdir(temp_prefix.c_str()))
+    std::cerr << "Warning:: failed to remove temp directory\n";
+
+#if 0
   std::string plot_cmd = "gnuplot --persist -e \"set key bottom right; "
                          "plot '-' using 1:2:3 with points pt 6 lc variable notitle"
                          ", x lc 'gray' notitle"
@@ -450,7 +602,6 @@ int plot_qq_main(int argc, char** argv)
                          ", NaN w p pt 6 lc 5 title 'MAF < 0.0001' \"";
 
   // TODO: determine min MAF bin
-
   std::FILE* pipe = popen(plot_cmd.c_str(), "w");
   if (!pipe)
     return perror("popen"), EXIT_FAILURE;
@@ -466,6 +617,7 @@ int plot_qq_main(int argc, char** argv)
   }
 
   pclose(pipe);
+#endif
 
   return EXIT_SUCCESS;
 }
