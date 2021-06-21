@@ -13,12 +13,12 @@
 
 bool load_geno_matrix_dense(savvy::reader& geno_file, std::vector<std::vector<float>>& geno)
 {
+  std::vector<float> geno_vec;
   savvy::variant var;
-  geno.emplace_back();
-  while (geno_file >> var && geno.size() < 5000)
+  geno.resize(geno_file.samples().size());
+  while (geno_file >> var) // && geno.size() < 5000)
   {
     if (var.alts().size() != 1) continue;
-    auto& geno_vec = geno.back();
     if (!var.get_format("GT", geno_vec))
       return std::cerr << "Error: variant mssing GT field\n", false; // TODO: allow skipping as an option
 
@@ -56,10 +56,10 @@ bool load_geno_matrix_dense(savvy::reader& geno_file, std::vector<std::vector<fl
         *it = (*it - 2.f * af) / std::sqrt(2.f * af * (1.f - af));
     }
 
-    geno.emplace_back();
+    assert(geno.size() == geno_vec.size());
+    for (std::size_t i = 0; i < geno.size(); ++i)
+      geno[i].emplace_back(geno_vec[i]);
   }
-
-  geno.pop_back();
 
   if (geno_file.bad())
     return std::cerr << "Error: read failure\n", false;
@@ -90,13 +90,13 @@ int grm_main(int argc, char** argv)
     for (std::size_t j = i; j < n_samples; ++j)
     {
       float agg = 0.f;
-      for (std::size_t k = 0; k < geno_matrix.size(); ++k)
+      for (std::size_t k = 0; k < geno_matrix[i].size(); ++k)
       {
-        agg += geno_matrix[k][i] * geno_matrix[k][j];
+        agg += geno_matrix[i][k] * geno_matrix[j][k];
       }
 
-      if (std::abs(agg / geno_matrix.size()) > 0.05)
-        std::cout << i << "\t" << j << "\t" << (agg / geno_matrix.size()) << "\n";
+      if (std::abs(agg / geno_matrix[i].size()) > 0.05)
+        std::cout << i << "\t" << j << "\t" << (agg / geno_matrix[i].size()) << "\n";
 
 //      if (j > 0)
 //        std::cout.put('\t');
