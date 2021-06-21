@@ -7,6 +7,7 @@
 #include "single.hpp"
 #include "plot.hpp"
 #include "pca.hpp"
+#include "grm.hpp"
 #include "tcdf.hpp"
 #include "logistic_score_model.hpp"
 #include "linear_model.hpp"
@@ -23,6 +24,9 @@
 #include <xtensor/xadapt.hpp>
 #include <xtensor/xrandom.hpp>
 #include <xtensor-blas/xlinalg.hpp>
+
+#include <eigen3/Eigen/Cholesky>
+#include <eigen3/Eigen/Sparse>
 
 #include <utility>
 #include <iostream>
@@ -816,6 +820,125 @@ int pca_test()
   return 0;
 }
 
+int chol_test()
+{
+  using namespace xt;
+  using namespace xt::linalg;
+
+  {
+    Eigen::MatrixXd FOO(3, 3);
+    FOO <<
+      0.0, 0.7, 9.0,
+      0.7, 0.0, 1.0,
+      9.0, 1.0, 0.0;
+    std::cerr << "FOO L\n" << Eigen::MatrixXd(FOO.llt().matrixL()) << std::endl;
+    std::cerr << "FOO L\n" << Eigen::MatrixXd(FOO.ldlt().matrixL()) << std::endl;
+    std::cerr << "FOO D\n" << Eigen::VectorXd(FOO.ldlt().vectorD()).transpose() << std::endl;
+
+
+
+    xtensor<double, 2> A = {
+      {1.3, 0.7, 0.0},
+      {0.7, 1.0, 0.0},
+      {0.0, 0.0, 1.5},
+    };
+
+    auto L = eval(cholesky(A));
+    std::cerr << "cholesky(A): " << L << std::endl;
+    double p = 1.;
+    for (std::size_t i = 0; i < L.shape(0); ++i) { p *= (L(i, i) * L(i, i)); }
+    std::cerr << "p: " << p << std::endl;
+    std::cerr << "log(p): " << std::log(p) << std::endl;
+
+    double lp = 0.;
+    for (std::size_t i = 0; i < L.shape(0); ++i) { lp += std::log(L(i, i) * L(i, i)); }
+    std::cerr << "lp: " << lp << std::endl;
+    std::cerr << "det(A): " << det(A) << std::endl;
+
+    Eigen::MatrixXd A_eig(3, 3);
+    A_eig << 1.3, 0.7, 0.0,
+             0.7, 1.0, 0.0,
+             0.0, 0.0, 1.5;
+
+    std::cerr << "L eig:\n" << Eigen::MatrixXd(A_eig.llt().matrixL()) << std::endl;
+    std::cerr << "L.square().log().sum():\n" << Eigen::MatrixXd(A_eig.llt().matrixL()).diagonal().array().square().log().sum() << std::endl;
+    std::cerr << "LD eig:\n" << Eigen::MatrixXd(A_eig.ldlt().matrixL()) << std::endl;
+    std::cerr << "D eig:\n" << Eigen::VectorXd(A_eig.ldlt().vectorD()).transpose() << std::endl;
+    std::cerr << "D square:\n" << Eigen::MatrixXd(A_eig.llt().matrixL()).diagonal().array().square().transpose() << std::endl;
+    std::cerr << "LD.log().sum():\n" << A_eig.ldlt().vectorD().array().log().sum() << std::endl;
+  }
+
+
+  xtensor<double, 2> X = {
+    {0., 0., 0., 2., 1., 0.},
+    {0., 0., 2., 0., 0., 0.},
+    {0., 1., 0., 0., 0., 0.},
+    {0., 2., 0., 0., 0., 0.},
+    {0., 0., 1., 0., 0., 1.},
+    {1., 0., 0., 0., 0., 0.},
+    {0., 1., 0., 1., 0., 0.},
+    {1., 0., 0., 0., 0., 1.}
+  };
+
+  //X = (X - xt::mean(X, 0)) / xt::stddev(X, 0);
+
+  {
+    for (std::size_t i = 0; i < X.shape(0); ++i)
+    {
+      auto r = row(X, i);
+      double af = sum(r)() / (r.size() * 2);
+      r = (r - 2. * af) / std::sqrt(2. * af * (1. - af));
+    }
+
+    std::cerr << "X: " << X << std::endl;
+
+    xtensor<double, 2> A = dot(transpose(X), X);
+
+    std::cerr << "A: " << A << std::endl;
+
+    std::cerr << "A/M: " << (dot(transpose(X), X) / X.shape(0)) << std::endl;
+
+//    xtensor<double, 2> D_inv = xt::zeros<double>(A.shape());
+//    for (std::size_t i = 0; i < A.shape(0); ++i)
+//      D_inv(i, i) = 1. / std::sqrt(A(i, i));
+//
+//    A = dot(dot(D_inv, A), D_inv);
+//    std::cerr << "A_corr: " << A << std::endl;
+
+    auto L = eval(cholesky(A));
+    std::cerr << "L: " << L << std::endl;
+    xtensor<double, 1> b = {0.1, 2.1, 0.12, 1.75, 0.41, 0.11};
+
+    auto x = eval(solve_cholesky(L, b));
+    std::cerr << "solve_cholesky(A, b): " << x << std::endl;
+    std::cerr << "solve(A, b): " << eval(solve(A, b)) << std::endl;
+    std::cerr << "lstsq(A, b): " << eval(dot(dot(pinv(dot(transpose(A), A)), transpose(A)), b)) << std::endl;
+  }
+
+  {
+    Eigen::MatrixXd X2(X.shape(0), X.shape(1));
+    for (std::size_t i = 0; i < X.shape(0); ++i)
+    {
+      for (std::size_t j = 0; j < X.shape(1); ++j)
+      {
+        X2(i, j) = X(i, j);
+      }
+    }
+
+    Eigen::MatrixXd A = X2.transpose() * X2;
+    Eigen::MatrixXd b (A.rows(), 1);
+    b << 0.1, 2.1, 0.12, 1.75, 0.41, 0.11;
+    Eigen::LDLT<Eigen::MatrixXd> solverA;
+    solverA.compute(A);
+    std::cerr << "Eigen L: " << Eigen::MatrixXd(solverA.matrixL()) << std::endl;
+    std::cerr << "Eigen D: " << solverA.vectorD() << std::endl;
+    auto x = solverA.solve(b);
+    std::cerr << "Eigen x: " << x.transpose() << std::endl;
+  }
+
+  return 0;
+}
+
 class prog_args
 {
 private:
@@ -881,6 +1004,8 @@ public:
 
 int main(int argc, char** argv)
 {
+  //return mm_main(argc, argv);
+  //return chol_test();
   //return pca_test();
   //challenger_test();
   //test();
@@ -912,6 +1037,8 @@ int main(int argc, char** argv)
     return plot_main(argc, argv);
   else if (args.sub_command() == "pca")
     return pca_main(argc, argv);
+  else if (args.sub_command() == "grm")
+    return grm_main(argc--, argv++);
 
   std::cerr << "Invalid sub-command (" << args.sub_command() << ")" << std::endl;
   args.print_usage(std::cerr);
