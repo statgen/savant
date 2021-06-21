@@ -7,6 +7,7 @@
 #include "grm.hpp"
 
 #include <savvy/reader.hpp>
+#include <omp.hpp>
 
 #include <iostream>
 #include <getopt.h>
@@ -75,6 +76,7 @@ int grm_main(int argc, char** argv)
   if (!load_geno_matrix_dense(geno_file, geno_matrix))
     return EXIT_FAILURE;
 
+  omp::internal::thread_pool2 tpool(1);
   std::size_t n_samples = geno_file.samples().size();
   for (std::size_t i = 0; i < n_samples; ++i)
   {
@@ -87,22 +89,33 @@ int grm_main(int argc, char** argv)
 //      std::cout.put('0');
 //    }
 
-    for (std::size_t j = i; j < n_samples; ++j)
+    std::vector<float> aggs(n_samples);
+    omp::parallel_for_exp(omp::static_schedule(), geno_matrix.begin() + i, geno_matrix.end(),[i, &geno_matrix, &aggs](std::vector<float>& j_vec, const omp::iteration_context& ctx)
     {
       float agg = 0.f;
       for (std::size_t k = 0; k < geno_matrix[i].size(); ++k)
       {
-        agg += geno_matrix[i][k] * geno_matrix[j][k];
+        agg += geno_matrix[i][k] * j_vec[k];
       }
 
-      if (std::abs(agg / geno_matrix[i].size()) > 0.05)
-        std::cout << i << "\t" << j << "\t" << (agg / geno_matrix[i].size()) << "\n";
+      aggs[ctx.index] = agg;
+
+//      std::size_t j = ctx.index;
+//      if (std::abs(agg / geno_matrix[i].size()) > 0.05)
+//        std::cout << i << "\t" << j << "\t" << (agg / geno_matrix[i].size()) << "\n";
 
 //      if (j > 0)
 //        std::cout.put('\t');
 //      float coef = agg / geno_matrix.size();
 //      std::cout << (std::abs(coef) < 0.05 ? 0.f : coef);
+    }, tpool);
+
+    for (std::size_t j = i; j < n_samples; ++j)
+    {
+      if (std::abs(aggs[j] / geno_matrix[i].size()) > 0.05)
+        std::cout << i << "\t" << j << "\t" << (aggs[j] / geno_matrix[i].size()) << "\n";
     }
+
     //std::cout << std::endl;
   }
 

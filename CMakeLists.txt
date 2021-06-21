@@ -8,12 +8,14 @@ include(CMakeFindDependencyMacro) # missing in xtensor-blasCMake.config
 find_package(xtensor-blas REQUIRED)
 find_package(Boost REQUIRED)
 find_package(savvy REQUIRED)
+find_package(Threads REQUIRED)
+find_library(OMP_LIB omp)
 #-DBOOST_UBLAS_NDEBUG
 
 add_executable(savant src/main.cpp src/single.cpp src/plot.cpp src/pca.cpp src/fit.cpp src/grm.cpp)
 target_compile_definitions(savant PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
 target_include_directories(savant PRIVATE include ${Boost_INCLUDE_DIRS})
-target_link_libraries(savant savvy xtensor-blas)
+target_link_libraries(savant savvy xtensor-blas ${OMP_LIB} ${CMAKE_THREAD_LIBS_INIT})
 
 
 install(TARGETS savant RUNTIME DESTINATION bin)

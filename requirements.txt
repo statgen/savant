@@ -1,4 +1,5 @@
 statgen/savvy
+jonathonl/omp@develop
 xtensor-stack/xtl
 xtensor-stack/xtensor
 xtensor-stack/xtensor-blas
