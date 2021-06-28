@@ -76,6 +76,8 @@ int grm_main(int argc, char** argv)
   if (!load_geno_matrix_dense(geno_file, geno_matrix))
     return EXIT_FAILURE;
 
+  std::ofstream output_file("/dev/stdout", std::ios::binary);
+
   omp::internal::thread_pool2 tpool(1);
   std::size_t n_samples = geno_file.samples().size();
   for (std::size_t i = 0; i < n_samples; ++i)
@@ -89,16 +91,18 @@ int grm_main(int argc, char** argv)
 //      std::cout.put('0');
 //    }
 
+    assert(geno_matrix.size() == n_samples);
     std::vector<float> aggs(n_samples);
     omp::parallel_for_exp(omp::static_schedule(), geno_matrix.begin() + i, geno_matrix.end(),[i, &geno_matrix, &aggs](std::vector<float>& j_vec, const omp::iteration_context& ctx)
     {
+      assert(geno_matrix[i].size() == j_vec.size());
       float agg = 0.f;
       for (std::size_t k = 0; k < geno_matrix[i].size(); ++k)
       {
         agg += geno_matrix[i][k] * j_vec[k];
       }
 
-      aggs[ctx.index] = agg;
+      aggs[i + ctx.index] = agg;
 
 //      std::size_t j = ctx.index;
 //      if (std::abs(agg / geno_matrix[i].size()) > 0.05)
@@ -112,8 +116,9 @@ int grm_main(int argc, char** argv)
 
     for (std::size_t j = i; j < n_samples; ++j)
     {
-      if (std::abs(aggs[j] / geno_matrix[i].size()) > 0.05)
-        std::cout << i << "\t" << j << "\t" << (aggs[j] / geno_matrix[i].size()) << "\n";
+      float val = aggs[j] / geno_matrix[i].size();
+      if (std::abs(val) > 0.05)
+        output_file << i << "\t" << j << "\t" << val << "\n";
     }
 
     //std::cout << std::endl;
