@@ -76,7 +76,10 @@ int grm_main(int argc, char** argv)
   if (!load_geno_matrix_dense(geno_file, geno_matrix))
     return EXIT_FAILURE;
 
+  std::size_t non_zero_cnt = 0;
+
   std::ofstream output_file("/dev/stdout", std::ios::binary);
+  output_file << "ID1\tID2\tKinship\n";
 
   omp::internal::thread_pool2 tpool(1);
   std::size_t n_samples = geno_file.samples().size();
@@ -118,11 +121,16 @@ int grm_main(int argc, char** argv)
     {
       float val = aggs[j] / geno_matrix[i].size();
       if (std::abs(val) > 0.05)
-        output_file << i << "\t" << j << "\t" << val << "\n";
+      {
+        output_file << geno_file.samples()[i] << "\t" << geno_file.samples()[j] << "\t" << val << "\n";
+        ++non_zero_cnt;
+      }
     }
 
     //std::cout << std::endl;
   }
+
+  std::cerr << "Sparsity: " << (double(non_zero_cnt) / double(n_samples * n_samples)) * 100. << "%" << std::endl;
 
   return EXIT_SUCCESS;
 }
