@@ -1031,7 +1031,7 @@ int main(int argc, char** argv)
     return EXIT_SUCCESS;
   }
 
-  if (args.sub_command() == "single")
+  if (args.sub_command() == "single" || args.sub_command() == "simulate")
     return single_main(argc, argv);
   else if (args.sub_command() == "plot")
     return plot_main(argc, argv);

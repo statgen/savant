@@ -92,7 +92,7 @@ public:
 //  std::cerr << "log(d.array().sum()): " << std::log(d.array().sum()) << std::endl;
 //  std::cerr << "d.array().log().sum(): " << d.array().log().sum() << std::endl;
 
-    double log_det_V = d.array().abs().log().sum();
+    double log_det_V = d.array().log().sum(); // d.array().abs().log().sum();
     double log_det_XtViX = qr.logAbsDeterminant();
     double ytPy = pheno.dot(Py);
 
@@ -130,6 +130,7 @@ public:
     double pheno_mean = y.array().mean();
     double pheno_std_dev = std::sqrt((y.array() - pheno_mean).square().sum()/(y.size()-1));
     y.array() -= pheno_mean;
+    //y /= pheno_std_dev;
     //y /= std::sqrt((y.array() - pheno_mean).square().sum()/y.size());
     //std::cerr << "pheno: " << pheno << std::endl;
 
@@ -396,7 +397,11 @@ public:
       if (id1_it == sample_map.end() || id2_it == sample_map.end())
         continue;
 
-      float coef = 2. * std::atof(str_fields[kin_idx].c_str());
+      float coef = /*2. * */ std::atof(str_fields[kin_idx].c_str());
+
+      if (id1_it->second == id2_it->second)
+        coef /= 2.f;
+
       max = std::max(max, coef);
       min = std::min(min, coef);
       assert(id1_it->second != id2_it->second);
@@ -436,6 +441,95 @@ public:
 //    for (auto it = sample_intersection.begin(); it != sample_intersection.end(); ++it)
 //      sp_id_out << *it << "\t" << *it << "\n";
 
+
+    return true;
+  }
+
+  static bool load_kinship(const std::string& kinship_file_path, Eigen::MatrixXd& kinship_matrix, const std::vector<std::string>& sample_intersection)
+  {
+    shrinkwrap::gz::istream kinship_file(kinship_file_path); // std::ifstream kinship_file(kinship_file_path, std::ios::binary);
+    if (!kinship_file)
+      return std::cerr << "Error: could not open kinship file\n", false;
+
+    std::unordered_map<std::string, std::size_t> sample_map;
+    sample_map.reserve(sample_intersection.size());
+
+    for (std::size_t i = 0; i < sample_intersection.size(); ++i)
+      sample_map.emplace(sample_intersection[i], i);
+
+    std::size_t id1_idx = std::size_t(-1);
+    std::size_t id2_idx = std::size_t(-1);
+    std::size_t kin_idx = std::size_t(-1);
+
+    std::string line;
+    if (!std::getline(kinship_file, line))
+      return std::cerr << "Error: kinship file empty\n", false;
+
+
+    auto header_names = utility::split_string_to_vector(line.c_str(), '\t');
+    if (header_names.empty())
+      return std::cerr << "Error: empty header\n", false;
+
+    if (header_names[0].size() && header_names[0][0] == '#')
+      header_names[0].erase(header_names[0].begin());
+
+    std::vector<std::size_t> mask(header_names.size());
+
+    for (std::size_t i = 0; i < header_names.size(); ++i)
+    {
+      if (header_names[i] == "ID1")
+      {
+        id1_idx = i;
+      }
+      else if (header_names[i] == "ID2")
+      {
+        id2_idx = i;
+      }
+      else if (header_names[i] == "Kinship")
+      {
+        kin_idx = i;
+      }
+    }
+
+    if (id1_idx == std::size_t(-1))
+      return std::cerr << "Error: missing ID1 column\n", false; // TODO: better error message
+    if (id2_idx == std::size_t(-1))
+      return std::cerr << "Error: missing ID2 column\n", false; // TODO: better error message
+    if (kin_idx == std::size_t(-1))
+      return std::cerr << "Error: missing Kinship column\n", false; // TODO: better error message
+
+    std::size_t cnt = 0;
+    float min = 1e28f;
+    float max = 0.f;
+    while (std::getline(kinship_file, line))
+    {
+      auto str_fields = utility::split_string_to_vector(line.c_str(), '\t');
+
+      if (str_fields.size() <= std::max(id1_idx, std::max(id2_idx, kin_idx)))
+        return std::cerr << "Error: not enough columns in kinship file\n", false;
+
+      auto id1_it = sample_map.find(str_fields[id1_idx]);
+      auto id2_it = sample_map.find(str_fields[id2_idx]);
+      if (id1_it == sample_map.end() || id2_it == sample_map.end())
+        continue;
+
+      float coef = /*2. * */ std::atof(str_fields[kin_idx].c_str());
+
+      if (id1_it->second == id2_it->second)
+        coef += 1e-3f; ///= 2.f;
+
+      max = std::max(max, coef);
+      min = std::min(min, coef);
+      //assert(id1_it->second != id2_it->second);
+      kinship_matrix(id1_it->second, id2_it->second) = coef; //.insert(id1_it->second, id2_it->second) = coef;
+      kinship_matrix(id2_it->second, id1_it->second) = coef;
+      //kinship_matrix.coeffRef(id2_it->second, id1_it->second) = coef;
+      ++cnt;
+    }
+
+    std::cerr << "min: " << min << std::endl;
+    std::cerr << "max: " << max << std::endl;
+    std::cerr << "cnt: " << cnt << std::endl;
 
     return true;
   }

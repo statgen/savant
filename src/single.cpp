@@ -470,6 +470,60 @@ int single_main(int argc, char** argv)
   if (!load_phenotypes(args, geno_file, xresp, xcov, sample_intersection))
     return std::cerr << "Could not load phenotypes\n", EXIT_FAILURE;
 
+#if 0
+  if ((true || std::string(argv[0]) == "simulate") && args.kinship_file_path().size())
+  {
+    Eigen::Map<Eigen::VectorXd> mapped_resp(xresp.data(), xresp.size());
+    Eigen::Map<Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> mapped_cov(xcov.data(), xcov.shape(0), xcov.shape(1));
+    Eigen::MatrixXd kinship(geno_file.samples().size(), geno_file.samples().size());
+    if (!mixed_effects_model::load_kinship(args.kinship_file_path(), kinship, geno_file.samples())) // sample_intersection))
+      return std::cerr << "Error: could not load kinship\n", EXIT_FAILURE;
+
+    auto K_ldlt = kinship.ldlt(); //Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> K_ldlt; K_ldlt.compute(kinship);
+    assert(K_ldlt.info() == Eigen::Success);
+
+    double log_det_V = K_ldlt.vectorD().array().log().sum();
+    double K_det = kinship.determinant(); // K_ldlt.determinant();
+
+    Eigen::VectorXd d = kinship.diagonal();
+    for (std::size_t i = 0; i < d.size(); ++i)
+    {
+      double v = d[i];
+      if (v == 0.)
+      {
+        auto a = 0;
+      }
+      else if (v < 0.05)
+      {
+        auto a = 0;
+      }
+
+    }
+    std::srand(891437); //(unsigned int) std::time(NULL));
+    Eigen::MatrixXd rand_vec(geno_file.samples().size(), 8);
+    std::default_random_engine rng(891437);
+    std::normal_distribution<double> nd(0., 1.);
+    int foo = rand_vec.cols();
+    for(std::size_t i = 0; i < rand_vec.rows(); ++i)
+    {
+      for (std::size_t j = 0; j < rand_vec.cols(); ++j)
+        rand_vec(i, j) = nd(rng);
+    }
+    Eigen::MatrixXd simulated_pheno = K_ldlt.matrixL() * rand_vec;
+    std::cout << "#iid";
+    for (std::size_t j = 0; j < simulated_pheno.cols(); ++j)
+      std::cout << "\tsimulated_pheno_" << j;
+    std::cout << std::endl;
+    for (std::size_t i = 0; i < simulated_pheno.rows(); ++i)
+    {
+      std::cout << geno_file.samples()[i];
+      for (std::size_t j = 0; j < simulated_pheno.cols(); ++j)
+        std::cout << "\t" << simulated_pheno(i, j);
+      std::cout << std::endl;
+    }
+    return EXIT_SUCCESS;
+  }
+#endif
   if (false)
     return run_collapse(args, geno_file, linear_model(xresp, xcov));
 
