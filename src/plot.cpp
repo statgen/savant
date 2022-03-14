@@ -1,8 +1,9 @@
 
 #include "plot.hpp"
 #include "utility.hpp"
+#include "getopt_wrapper.hpp"
 
-#include <shrinkwrap/gz.hpp>
+#include <shrinkwrap/istream.hpp>
 
 #include <cstdlib>
 #include <fstream>
@@ -622,6 +623,275 @@ int plot_qq_main(int argc, char** argv)
   return EXIT_SUCCESS;
 }
 
+class plot_manhattan_prog_args : public getopt_wrapper
+{
+private:
+  std::string input_path_ = "/dev/stdin";
+  std::string custom_plot_commands_;
+  std::string output_path_ = "/dev/stdout";
+  std::uint64_t min_mac_ = 5;
+  bool help_ = false;
+public:
+  plot_manhattan_prog_args() :
+    getopt_wrapper(
+      "Usage: savant plot manhattan [opts ...] <results_file>",
+      {
+        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
+        {"help", no_argument, 0, 'h', "Print usage"},
+        {"min-mac", required_argument, 0, 'm', "Minimum minor allele count"},
+        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
+      })
+  {
+  }
+
+  const std::string& input_path() const { return input_path_; }
+  const std::string& output_path() const { return output_path_; }
+  const std::string& custom_plot_commands() const { return custom_plot_commands_; }
+  std::uint64_t min_mac() const { return min_mac_; }
+
+  bool help_is_set() const { return help_; }
+
+  bool parse(int argc, char** argv)
+  {
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index )) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case 'g':
+        custom_plot_commands_ = optarg ? optarg : "";
+        custom_plot_commands_.erase(custom_plot_commands_.find_last_not_of(" \t\r\n;") + 1);
+        custom_plot_commands_ += "; ";
+        break;
+      case 'h':
+        help_ = true;
+        return true;
+      case 'm':
+        min_mac_ = (std::uint64_t )std::atoll(optarg ? optarg : "");
+        break;
+      case 'o':
+        output_path_ = optarg ? optarg : "";
+        break;
+      default:
+        return false;
+      }
+    }
+
+    int remaining_arg_count = argc - optind;
+
+    if (remaining_arg_count == 1)
+    {
+      input_path_ = argv[optind];
+    }
+    else if (remaining_arg_count > 1)
+    {
+      std::cerr << "Too many arguments\n";
+      return false;
+    }
+
+    return true;
+  }
+};
+
+void init_chrom_length_map(std::unordered_map<std::string, long long>& map)
+{
+  map.insert({
+    {"1", 249250621},
+    {"2", 243199373},
+    {"3", 198022430},
+    {"4", 191154276},
+    {"5", 180915260},
+    {"6", 171115067},
+    {"7", 159138663},
+    {"8", 146364022},
+    {"9", 141213431},
+    {"10", 135534747},
+    {"11", 135006516},
+    {"12", 133851895},
+    {"13", 115169878},
+    {"14", 107349540},
+    {"15", 102531392},
+    {"16", 90354753},
+    {"17", 81195210},
+    {"18", 78077248},
+    {"19", 59128983},
+    {"20", 63025520},
+    {"21", 48129895},
+    {"22", 51304566},
+    {"X", 155270560},
+    {"Y", 59373566},
+    {"chr1", 248956422},
+    {"chr2", 242193529},
+    {"chr3", 198295559},
+    {"chr4", 190214555},
+    {"chr5", 181538259},
+    {"chr6", 170805979},
+    {"chr7", 159345973},
+    {"chr8", 145138636},
+    {"chr9", 138394717},
+    {"chr10", 133797422},
+    {"chr11", 135086622},
+    {"chr12", 133275309},
+    {"chr13", 114364328},
+    {"chr14", 107043718},
+    {"chr15", 101991189},
+    {"chr16", 90338345},
+    {"chr17", 83257441},
+    {"chr18", 80373285},
+    {"chr19", 58617616},
+    {"chr20", 64444167},
+    {"chr21", 46709983},
+    {"chr22", 50818468},
+    {"chrX", 156040895},
+    {"chrY", 57227415},
+    {"chrM", 16569}});
+}
+
+int plot_manhattan_main(int argc, char** argv)
+{
+  plot_manhattan_prog_args args;
+  if (!args.parse(argc, argv))
+  {
+    args.print_usage(std::cerr);
+    return EXIT_FAILURE;
+  }
+
+  if (args.help_is_set())
+  {
+    args.print_usage(std::cout);
+    return EXIT_SUCCESS;
+  }
+
+  std::string line;
+  shrinkwrap::istream results_file(args.input_path());
+  if (!results_file || !std::getline(results_file, line))
+    return std::cerr << "Error: could not open results file ("<< args.input_path() << ")\n", EXIT_FAILURE;
+
+  if (line.empty())
+    return std::cerr << "Error: empty header line\n", EXIT_FAILURE;
+
+  std::unordered_map<std::string, long long> chrom_lengths;
+  init_chrom_length_map(chrom_lengths);
+
+  std::string temp_path = "/tmp/savant_plot_mh_XXXXXX";
+  int tmp_fd = mkstemp(&temp_path[0]);
+  if (tmp_fd < 0)
+    return std::cerr << "Error: could not open temp file (" << temp_path << ")" << std::endl, EXIT_FAILURE;
+  std::ofstream temp_file(temp_path);
+  ::close(tmp_fd);
+  // Cannot unlink until after gnuplot is run
+
+  auto fields = utility::split_string_to_vector(line, '\t');
+
+  if (fields[0].size() && fields[0][0] == '#')
+    fields[0].erase(0, 1);
+
+  std::size_t chrom_idx = 0;
+  for ( ; chrom_idx < fields.size(); ++chrom_idx)
+    if (fields[chrom_idx] == "chrom") break;
+
+  std::size_t pval_idx = 0;
+  for ( ; pval_idx < fields.size(); ++pval_idx)
+    if (fields[pval_idx] == "pvalue") break;
+
+  std::size_t mac_idx = 0;
+  for ( ; mac_idx < fields.size(); ++mac_idx)
+    if (fields[mac_idx] == "mac") break;
+
+  std::size_t pos_idx = 0;
+  for ( ; pos_idx < fields.size(); ++pos_idx)
+    if (fields[pos_idx] == "pos") break;
+
+  if (chrom_idx == fields.size())
+    return std::cerr << "Error: 'chrom' missing from header line\n", EXIT_FAILURE;
+
+  if (pval_idx == fields.size())
+    return std::cerr << "Error: 'pvalue' missing from header line\n", EXIT_FAILURE;
+
+  if (mac_idx == fields.size())
+    return std::cerr << "Error: 'maf' missing from header line\n", EXIT_FAILURE;
+
+  if (pos_idx == fields.size())
+    return std::cerr << "Error: 'pos' missing from header line\n", EXIT_FAILURE;
+
+  std::size_t max_idx = std::max(pval_idx, std::max(chrom_idx, std::max(mac_idx, pos_idx)));
+  double min_pval = 1.;
+  const long long padding = 50000000;
+  long long x_axis_offset = padding / 2;
+  long long pos = 0;
+  std::size_t chrom_cnt = 0;
+  std::string prev_chrom;
+  std::list<std::pair<std::string, long long>> xtics;
+  while (std::getline(results_file, line))
+  {
+    if (line.size() && line[0] == '#') continue;
+    fields = utility::split_string_to_vector(line, '\t');
+
+    if (max_idx >= fields.size())
+      return std::cerr << "Error: number of columns do not match header line" << std::endl, EXIT_FAILURE;
+
+    std::uint64_t mac = std::atoll(fields[mac_idx].c_str());
+    if (mac < args.min_mac())
+      continue;
+
+    double pval = std::atof(fields[pval_idx].c_str());
+    if (pval < min_pval)
+      min_pval = pval;
+
+    if (fields[chrom_idx] != prev_chrom)
+    {
+      ++chrom_cnt;
+      if (prev_chrom.size())
+      {
+        long long section_width = std::max(chrom_lengths[prev_chrom], pos);
+        if (prev_chrom.size() > 3 && prev_chrom.compare(0, 3, "chr") == 0)
+          prev_chrom.erase(0, 3);
+        xtics.emplace_back(prev_chrom, x_axis_offset + section_width / 2);
+        x_axis_offset += (section_width + padding);
+      }
+      prev_chrom = fields[chrom_idx];
+    }
+
+    pos = std::atoll(fields[pos_idx].c_str());
+
+    temp_file << (pos + x_axis_offset) << "\t" << pval << "\t" << ((chrom_cnt % 2) + 2) << "\n";
+  }
+
+  long long section_width = std::max(chrom_lengths[prev_chrom], pos);
+  if (prev_chrom.size() > 3 && prev_chrom.compare(0, 3, "chr") == 0)
+    prev_chrom.erase(0, 3);
+  xtics.emplace_back(prev_chrom, x_axis_offset + section_width / 2);
+
+  std::stringstream plot_cmd;
+  plot_cmd << "gnuplot --persist -e \"";
+  if (args.custom_plot_commands().size())
+    plot_cmd << args.custom_plot_commands();
+  plot_cmd << "set xrange [1:]; ";
+  plot_cmd << "set logscale y; set yrange [1:" << std::min(5e-12, min_pval / 10.) << "]; ";
+  plot_cmd << "set xtics (";
+  for (auto it = xtics.begin(); it != xtics.end(); ++it)
+  {
+    if (it != xtics.begin())
+      plot_cmd << ", ";
+    plot_cmd << "'" << it->first << "' " << it->second;
+  }
+  plot_cmd << "); ";
+  plot_cmd << "plot '" + temp_path + "' using 1:2:3 with points pt 6 lc variable title ''";
+  plot_cmd << ", 5e-8 lc 'gray' notitle \"";
+  std::cerr << plot_cmd.str() << std::endl;
+
+  std::FILE* pipe = popen(plot_cmd.str().c_str(), "w");
+  if (!pipe)
+    return perror("popen"), EXIT_FAILURE;
+  pclose(pipe);
+
+  std::remove(temp_path.c_str());
+
+  return EXIT_SUCCESS;
+}
+
 int plot_main(int argc, char** argv)
 {
   if (argc < 1)
@@ -630,6 +900,8 @@ int plot_main(int argc, char** argv)
   std::string plot_type(argv[1]);
   if (plot_type == "qq")
     return plot_qq_main(--argc, ++argv);
+  else if (plot_type == "manhattan")
+    return plot_manhattan_main(--argc, ++argv);
   else if (plot_type == "pca")
     return plot_pca_main(--argc, ++argv);
   else
