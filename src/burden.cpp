@@ -42,22 +42,6 @@ public:
     }
     return true;
   }
-
-  bool process_opt(char copt, int long_index)
-  {
-    switch (copt)
-    {
-    case '\x02':
-      if (std::string("group-file") == long_options_[long_index].name)
-      {
-        group_file_ = optarg ? optarg : "";
-      }
-      break;
-    default:
-      return false;
-    }
-    return true;
-  }
 };
 
 // [CHROM]:[POS]_[REF]/[ALT]

@@ -129,8 +129,6 @@ public:
     return true;
   }
 
-  virtual bool process_opt(char copt, int long_index) { return false; }
-
   bool parse(int argc, char** argv)
   {
     int long_index = 0;
