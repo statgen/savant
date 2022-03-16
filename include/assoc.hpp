@@ -8,6 +8,7 @@
 #define SAVANT_ASSOC_HPP
 
 #include "utility.hpp"
+#include "getopt_wrapper.hpp"
 
 #include <savvy/reader.hpp>
 
@@ -16,12 +17,12 @@
 #include <fstream>
 #include <getopt.h>
 
-class assoc_prog_args
+class assoc_prog_args : public getopt_wrapper
 {
 private:
-  std::string sub_command_;
-  std::vector<option> long_options_;
-  std::string short_options_;
+  //std::string sub_command_;
+  //std::vector<option> long_options_;
+  //std::string short_options_;
   std::vector<std::string> covariate_fields_;
   std::string id_field_;
   std::string phenotype_field_;
@@ -39,45 +40,50 @@ private:
   bool logit_ = false;
   bool trust_info_ = false;
   bool help_ = false;
-public:
-  assoc_prog_args(const std::string& sub_command, std::vector<option>&& additional_options) :
-    sub_command_(sub_command),
-    long_options_(
-      {
-        {"cov", required_argument, 0, 'c'},
-        {"debug-log", required_argument, 0, '\x02'},
-        {"fmt-field", required_argument, 0, '\x02'},
-        {"help", no_argument, 0, 'h'},
-        {"id", required_argument, 0, 'i'},
-        {"kinship", required_argument, 0, 'k'},
-        {"logit", no_argument, 0, 'b'},
-        {"min-mac", required_argument, 0, '\x02'},
-        {"never-sparse", no_argument, 0, '\x01'},
-        {"no-sparse", no_argument, 0, '\x01'},
-        {"always-sparse", no_argument, 0, '\x01'},
-        {"output", required_argument, 0, 'o'},
-        {"pheno", required_argument, 0, 'p'},
-        {"region", required_argument, 0, 'r'},
-        {"trust-info", no_argument, 0, '\x01'},
-        {"wgeno", required_argument, 0, '\x02'},
-        {0, 0, 0, 0}
-      })
+private:
+  static std::vector<option_with_desc>& merge_longopts(std::vector<option_with_desc>& additional_options)
   {
-    long_options_.reserve(long_options_.size() + additional_options.size());
-    long_options_.insert(--long_options_.end(), additional_options.begin(), additional_options.end());
+    additional_options.insert(--additional_options.end(), {
+      {"cov", required_argument, 0, 'c', "Comma separated list of covariate columns"},
+      {"debug-log", required_argument, 0, '\x02', "Enables debug logging and specifies log file"},
+      {"fmt-field", required_argument, 0, '\x02', "Format field to use (DS, HDS, or GT)"},
+      {"help", no_argument, 0, 'h', "Print Usage"},
+      {"id", required_argument, 0, 'i', "Sample ID column (defaults to first column)"},
+      {"kinship", required_argument, 0, 'k', "Kinship file"},
+      {"logit", no_argument, 0, 'b', "Enable logistic model"},
+      {"min-mac", required_argument, 0, '\x02', "Minimum minor allele count (default: 1)"},
+      {"never-sparse", no_argument, 0, '\x01', "Disables sparse optimizations"},
+      {"no-sparse", no_argument, 0, '\x01', ""},
+      {"always-sparse", no_argument, 0, '\x01', "Forces sparse optimizations even for dense file records"},
+      {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
+      {"pheno", required_argument, 0, 'p', "Phenotype column"},
+      {"region", required_argument, 0, 'r', "Genomic region to test (chrom:beg-end)"},
+      {"trust-info", no_argument, 0, '\x01', "Uses AC and AN INFO fields instead of computing values"},
+      {"wgeno", required_argument, 0, '\x02', "Path to thinned genotypes used for fitting whole genome model"}
+    });
 
-    short_options_.reserve((long_options_.size() - 1) * 2);
-    std::vector<bool> mask(256, false);
-    for (const auto& o : long_options_)
-    {
-      if (!mask[unsigned(o.val)])
-      {
-        short_options_ += (char)o.val;
-        if (o.has_arg == required_argument)
-          short_options_ += ':';
-        mask[(unsigned)o.val] = true;
-      }
-    }
+    return additional_options;
+  }
+public:
+  assoc_prog_args(const std::string& sub_command, std::vector<option_with_desc>&& additional_options) :
+    getopt_wrapper("Usage: savant " + sub_command + " [opts ...] <geno_file> <pheno_file>",
+      std::move(merge_longopts(additional_options)))
+  {
+//    long_options_.reserve(long_options_.size() + additional_options.size());
+//    long_options_.insert(--long_options_.end(), additional_options.begin(), additional_options.end());
+
+//    short_options_.reserve((long_options_.size() - 1) * 2);
+//    std::vector<bool> mask(256, false);
+//    for (const auto& o : long_options_)
+//    {
+//      if (!mask[unsigned(o.val)])
+//      {
+//        short_options_ += (char)o.val;
+//        if (o.has_arg == required_argument)
+//          short_options_ += ':';
+//        mask[(unsigned)o.val] = true;
+//      }
+//    }
   }
 
   virtual ~assoc_prog_args() {}
@@ -123,35 +129,13 @@ public:
     return true;
   }
 
-  void print_usage(std::ostream& os)
-  {
-    os << "Usage: savant " << sub_command_ << " [opts ...] <geno_file> <pheno_file> \n";
-    os << "\n";
-    os << " -c, --cov            Comma separated list of covariate columns\n";
-    os << " -h, --help           Print usage\n";
-    os << " -i, --id             Sample ID column (defaults to first column)\n";
-    os << " -k, --kinship        Kinship file\n";
-    os << " -b, --logit          Enable logistic model\n";
-    os << " -o, --output         Output path (default: /dev/stdout)\n";
-    os << " -p, --pheno          Phenotype column\n";
-    os << " -r, --region         Genomic region to test (chrom:beg-end)\n";
-    os << "     --min-mac        Minimum minor allele count (default: 1)\n";
-    os << "     --never-sparse   Disables sparse optimizations\n";
-    os << "     --always-sparse  Forces sparse optimizations even for dense file records\n";
-    os << "     --fmt-field      Format field to use (DS, HDS, or GT)\n";
-    os << "     --debug-log      Enables debug logging and specifies log file\n";
-    os << "     --trust-info     Uses AC and AN INFO fields instead of computing values\n";
-    os << "     --wgeno          Path to thinned genotypes used for fitting whole genome model\n";
-    os << std::flush;
-  }
-
-  virtual bool process_opt(char copt) { return false; }
+  virtual bool process_opt(char copt, int long_index) { return false; }
 
   bool parse(int argc, char** argv)
   {
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, short_options_.c_str() /*"\x01\x02:bc:ho:p:r:"*/, long_options_.data(), &long_index )) != -1)
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str() /*"\x01\x02:bc:ho:p:r:"*/, long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
@@ -219,9 +203,8 @@ public:
       case 'r':
         region_.reset(new savvy::genomic_region(utility::string_to_region(optarg ? optarg : "")));
         break;
-      default:
-        if (!process_opt(copt))
-          return false;
+      case '?':
+        return false;
       }
     }
 

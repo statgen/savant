@@ -4,9 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-#ifndef SAVANT_GROUP_HPP
-#define SAVANT_GROUP_HPP
+#ifndef SAVANT_BURDEN_HPP
+#define SAVANT_BURDEN_HPP
 
-int group_main(int argc, char** argv);
+int burden_main(int argc, char** argv);
 
-#endif // SAVANT_GROUP_HPP
+#endif // SAVANT_BURDEN_HPP

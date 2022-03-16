@@ -1,31 +1,49 @@
 #include "assoc.hpp"
-#include "group.hpp"
+#include "burden.hpp"
+#include "debug_log.hpp"
 
 #include <savvy/reader.hpp>
 
-class group_prog_args : public assoc_prog_args
+class burden_prog_args : public assoc_prog_args
 {
 private:
   std::string group_file_;
 public:
-  group_prog_args() :
-    assoc_prog_args("group", {
-      {"group-file", required_argument, 0, '\x02'}
+  burden_prog_args() :
+    assoc_prog_args("burden", {
+      {"group-file", required_argument, 0, '\x03', "Path to group file"}
     })
   {
 
   }
 
-  void print_usage(std::ostream& os)
+  bool parse(int argc, char** argv)
   {
-    assoc_prog_args::print_usage(os);
-    os << "\n";
-    os << "Group options:\n";
-    os << "     --group-file     Path to group file\n";
-    os << std::flush;
+    if (!assoc_prog_args::parse(argc, argv))
+      return false;
+
+    optind = 1; // reset getopt for second loop
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index)) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case '\x03':
+        if (std::string("group-file") == long_options_[long_index].name)
+        {
+          group_file_ = optarg ? optarg : "";
+        }
+        break;
+      case '?':
+        return false;
+      }
+    }
+    return true;
   }
 
-  bool process_opt(char copt)
+  bool process_opt(char copt, int long_index)
   {
     switch (copt)
     {
@@ -66,9 +84,9 @@ static savvy::site_info marker_id_to_site_info(std::string::const_iterator beg, 
   return savvy::site_info{};
 }
 
-int group_main(int argc, char** argv)
+int burden_main(int argc, char** argv)
 {
-  group_prog_args args;
+  burden_prog_args args;
   if (!args.parse(argc, argv))
   {
     args.print_usage(std::cerr);

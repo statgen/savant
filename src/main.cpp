@@ -5,6 +5,7 @@
  */
 
 #include "single.hpp"
+#include "burden.hpp"
 #include "plot.hpp"
 #include "pca.hpp"
 #include "grm.hpp"
@@ -1033,6 +1034,8 @@ int main(int argc, char** argv)
 
   if (args.sub_command() == "single" || args.sub_command() == "simulate")
     return single_main(argc, argv);
+  else if (args.sub_command() == "burden")
+    return burden_main(argc, argv);
   else if (args.sub_command() == "plot")
     return plot_main(argc, argv);
   else if (args.sub_command() == "pca")

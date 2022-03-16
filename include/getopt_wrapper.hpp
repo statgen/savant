@@ -30,18 +30,18 @@ protected:
   std::string short_opt_string_;
   std::size_t max_long_opt_length_ = 0;
 public:
-  getopt_wrapper(std::string usage_str, std::vector<option_with_desc> long_opts) :
+  getopt_wrapper(std::string usage_str, std::vector<option_with_desc>&& long_opts) :
     usage_str_(std::move(usage_str)),
     opts_(std::move(long_opts))
   {
-
+    std::unordered_set<char> unique_vals;
     long_options_.resize(opts_.size() + 1, {0, 0, 0, 0});
     auto lit = long_options_.begin();
     for (auto it = opts_.begin(); it != opts_.end(); ++it)
     {
       *(lit++) = *it;
       max_long_opt_length_ = std::max(max_long_opt_length_, it->name ? std::strlen(it->name) : 0);
-      if (it->val)
+      if (it->val && unique_vals.insert(it->val).second)
       {
         short_opt_string_ += (char)it->val;
         if (it->has_arg == required_argument)
