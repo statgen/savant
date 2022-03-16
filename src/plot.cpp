@@ -14,9 +14,8 @@
 #include <cmath>
 #include <sstream>
 #include <sys/stat.h>
-#include <getopt.h>
 
-class plot_pca_prog_args
+class plot_pca_prog_args : public getopt_wrapper
 {
 private:
   std::vector<option> long_options_;
@@ -29,13 +28,12 @@ private:
   bool help_ = false;
 public:
   plot_pca_prog_args() :
-    long_options_(
+    getopt_wrapper("Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>]",
       {
-        {"gnuplot-opts", required_argument, 0, 'g'},
-        {"help", no_argument, 0, 'h'},
-        {"output", required_argument, 0, 'o'},
-        {"pcs", required_argument, 0, 'p'},
-        {0, 0, 0, 0}
+        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
+        {"help", no_argument, 0, 'h', "Print usage"},
+        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
+        {"pcs", required_argument, 0, 'p', "PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)"}
       })
   {
   }
@@ -49,22 +47,11 @@ public:
   int num_pcs() const { return num_pcs_; }
   bool help_is_set() const { return help_; }
 
-  void print_usage(std::ostream& os)
-  {
-    os << "Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>] \n";
-    os << "\n";
-    os << " -g, --gnuplot-opts  Custom gnuplot commands to include\n";
-    os << " -h, --help          Print usage\n";
-    os << " -o, --output        Output path (default: /dev/stdout)\n";
-    os << " -p, --pcs           PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)\n";
-    os << std::flush;
-  }
-
   bool parse(int argc, char** argv)
   {
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, "g:ho:p:", long_options_.data(), &long_index )) != -1)
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
@@ -386,10 +373,9 @@ int plot_pca_main(int argc, char** argv)
   return EXIT_SUCCESS;
 }
 
-class plot_qq_prog_args
+class plot_qq_prog_args : public getopt_wrapper
 {
 private:
-  std::vector<option> long_options_;
   std::string input_path_;
   std::string custom_plot_commands_;
   std::string output_path_ = "/dev/stdout";
@@ -397,13 +383,13 @@ private:
   bool help_ = false;
 public:
   plot_qq_prog_args() :
-    long_options_(
+    getopt_wrapper(
+      "Usage: savant plot qq [opts ...] <results_file>",
       {
-        {"gnuplot-opts", required_argument, 0, 'g'},
-        {"help", no_argument, 0, 'h'},
-        {"output", required_argument, 0, 'o'},
-        {"pcs", required_argument, 0, 'p'},
-        {0, 0, 0, 0}
+        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
+        {"help", no_argument, 0, 'h', "Print usage"},
+        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
+        {"bins", required_argument, 0, 'b', "Max number of bins (default: 5)"}
       })
   {
   }
@@ -415,22 +401,11 @@ public:
   int n_bins() const { return n_bins_; }
   bool help_is_set() const { return help_; }
 
-  void print_usage(std::ostream& os)
-  {
-    os << "Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>] \n";
-    os << "\n";
-    os << " -g, --gnuplot-opts  Custom gnuplot commands to include\n";
-    os << " -h, --help          Print usage\n";
-    os << " -o, --output        Output path (default: /dev/stdout)\n";
-    os << " -b, --bins          Max number of bins (default: 5)\n";
-    os << std::flush;
-  }
-
   bool parse(int argc, char** argv)
   {
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, "g:ho:b:", long_options_.data(), &long_index )) != -1)
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
