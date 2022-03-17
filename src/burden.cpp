@@ -7,15 +7,26 @@
 class burden_prog_args : public assoc_prog_args
 {
 private:
-  std::string group_file_;
+  std::string groups_file_;
+  float threshold_ = 1.f;
+  std::uint32_t permutations_ = 10000;
+  bool frequency_weighted_ = false;
 public:
   burden_prog_args() :
     assoc_prog_args("burden", {
-      {"group-file", required_argument, 0, '\x03', "Path to group file"}
+      {"groups-file", "<file>", 'g', "Path to file listing groups of variants to collapse"},
+      {"permutations", "<int>", 'n', "Number of permutations to use for variable threshold"},
+      {"threshold", "<arg>", 't', "MAF threshold for rare variants (a fixed number in the range (0:0.5] or 'variable')"},
+      {"frequency-weighted", "", 'w', "Weight allele contribution using 1/sqrt(MAF(1-MAF))"}
     })
   {
 
   }
+
+  const std::string& groups_file() const { return groups_file_; }
+  float threshold() const { return threshold_; }
+  std::uint32_t permutations() const { return permutations_; }
+  bool frequency_weighted() const { return frequency_weighted_; }
 
   bool parse(int argc, char** argv)
   {
@@ -33,7 +44,7 @@ public:
       case '\x03':
         if (std::string("group-file") == long_options_[long_index].name)
         {
-          group_file_ = optarg ? optarg : "";
+          groups_file_ = optarg ? optarg : "";
         }
         break;
       case '?':

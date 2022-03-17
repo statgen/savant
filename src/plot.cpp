@@ -30,10 +30,10 @@ public:
   plot_pca_prog_args() :
     getopt_wrapper("Usage: savant plot pca [opts ...] <results_file> [<id_to_pop_file>]",
       {
-        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
-        {"help", no_argument, 0, 'h', "Print usage"},
-        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
-        {"pcs", required_argument, 0, 'p', "PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)"}
+        {"gnuplot-opts", "<cmds>", 'g', "Custom gnuplot commands to include"},
+        {"help", "", 'h', "Print usage"},
+        {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
+        {"pcs", "<range>", 'p', "PC range to plot in the format <FIRST_PC>:<LAST_PC> (default: 1:2)"}
       })
   {
   }
@@ -386,10 +386,10 @@ public:
     getopt_wrapper(
       "Usage: savant plot qq [opts ...] <results_file>",
       {
-        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
-        {"help", no_argument, 0, 'h', "Print usage"},
-        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
-        {"bins", required_argument, 0, 'b', "Max number of bins (default: 5)"}
+        {"gnuplot-opts", "<cmds>", 'g', "Custom gnuplot commands to include"},
+        {"help", "", 'h', "Print usage"},
+        {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
+        {"bins", "<int>", 'b', "Max number of bins (default: 5)"}
       })
   {
   }
@@ -611,10 +611,10 @@ public:
     getopt_wrapper(
       "Usage: savant plot manhattan [opts ...] <results_file>",
       {
-        {"gnuplot-opts", required_argument, 0, 'g', "Custom gnuplot commands to include"},
-        {"help", no_argument, 0, 'h', "Print usage"},
-        {"min-mac", required_argument, 0, 'm', "Minimum minor allele count"},
-        {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
+        {"gnuplot-opts", "<cmds>", 'g', "Custom gnuplot commands to include"},
+        {"help", "", 'h', "Print usage"},
+        {"min-mac", "<int>", 'm', "Minimum minor allele count"},
+        {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       })
   {
   }

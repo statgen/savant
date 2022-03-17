@@ -11,15 +11,17 @@
 class getopt_wrapper
 {
 public:
-  struct option_with_desc : public ::option
+  struct option_with_desc
   {
-    const char* description;
-    option_with_desc(const char* _name, int _has_arg, int* _flag, int _val, const char* _description)
+    std::string long_opt;
+    std::string argument;
+    int short_opt;
+    std::string description;
+    option_with_desc(const std::string& _long_opt, const std::string& _argument, int _short_opt, const std::string& _description)
     {
-      name = _name;
-      has_arg = _has_arg;
-      flag = _flag;
-      val = _val;
+      long_opt = _long_opt;
+      argument = _argument;
+      short_opt = _short_opt;
       description = _description;
     }
   };
@@ -39,12 +41,12 @@ public:
     auto lit = long_options_.begin();
     for (auto it = opts_.begin(); it != opts_.end(); ++it)
     {
-      *(lit++) = *it;
-      max_long_opt_length_ = std::max(max_long_opt_length_, it->name ? std::strlen(it->name) : 0);
-      if (it->val && unique_vals.insert(it->val).second)
+      *(lit++) = {it->long_opt.c_str(), it->argument.empty() ? no_argument : required_argument, NULL, it->short_opt};
+      max_long_opt_length_ = std::max(max_long_opt_length_, it->long_opt.size() + it->argument.size());
+      if (it->short_opt && unique_vals.insert(it->short_opt).second)
       {
-        short_opt_string_ += (char)it->val;
-        if (it->has_arg == required_argument)
+        short_opt_string_ += (char)it->short_opt;
+        if (!it->argument.empty())
           short_opt_string_ += ':';
       }
     }
@@ -56,26 +58,30 @@ public:
     os << '\n';
     for (auto it = opts_.begin(); it != opts_.end(); ++it)
     {
-      if (!it->description)
+      if (it->description.empty())
         continue;
 
-      if (std::isprint(it->val))
+      if (std::isprint(it->short_opt))
       {
-        if (it->name)
-          os << " -" << (char)it->val << ", ";
+        if (it->long_opt.empty())
+          os << " -" << (char)it->short_opt << "  ";
         else
-          os << " -" << (char)it->val << "  ";
+          os << " -" << (char)it->short_opt << ", ";
       }
       else
         os << "     ";
 
       std::size_t n_spaces = 2;
-      if (it->name)
-        os << "--" << it->name;
-      else
+      if (it->long_opt.empty())
         n_spaces += 2;
+      else
+        os << "--" << it->long_opt;
 
-      n_spaces += max_long_opt_length_ - std::strlen(it->name);
+      os.put(' ');
+      if (!it->argument.empty())
+        os << it->argument;
+
+      n_spaces += max_long_opt_length_ - it->long_opt.size() - it->argument.size();
       for (std::size_t i = 0; i < n_spaces; ++i)
         os.put(' ');
       os << it->description << '\n';

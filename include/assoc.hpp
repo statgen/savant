@@ -43,23 +43,23 @@ private:
 private:
   static std::vector<option_with_desc>& merge_longopts(std::vector<option_with_desc>& additional_options)
   {
-    additional_options.insert(--additional_options.end(), {
-      {"cov", required_argument, 0, 'c', "Comma separated list of covariate columns"},
-      {"debug-log", required_argument, 0, '\x02', "Enables debug logging and specifies log file"},
-      {"fmt-field", required_argument, 0, '\x02', "Format field to use (DS, HDS, or GT)"},
-      {"help", no_argument, 0, 'h', "Print Usage"},
-      {"id", required_argument, 0, 'i', "Sample ID column (defaults to first column)"},
-      {"kinship", required_argument, 0, 'k', "Kinship file"},
-      {"logit", no_argument, 0, 'b', "Enable logistic model"},
-      {"min-mac", required_argument, 0, '\x02', "Minimum minor allele count (default: 1)"},
-      {"never-sparse", no_argument, 0, '\x01', "Disables sparse optimizations"},
-      {"no-sparse", no_argument, 0, '\x01', ""},
-      {"always-sparse", no_argument, 0, '\x01', "Forces sparse optimizations even for dense file records"},
-      {"output", required_argument, 0, 'o', "Output path (default: /dev/stdout)"},
-      {"pheno", required_argument, 0, 'p', "Phenotype column"},
-      {"region", required_argument, 0, 'r', "Genomic region to test (chrom:beg-end)"},
-      {"trust-info", no_argument, 0, '\x01', "Uses AC and AN INFO fields instead of computing values"},
-      {"wgeno", required_argument, 0, '\x02', "Path to thinned genotypes used for fitting whole genome model"}
+    additional_options.insert(additional_options.end(), {
+      {"cov", "<columns>", 'c', "Comma separated list of covariate columns"},
+      {"debug-log", "<file>", '\x02', "Enables debug logging and specifies log file"},
+      {"fmt-field", "<string>", '\x02', "Format field to use (DS, HDS, or GT)"},
+      {"help", "", 'h', "Print Usage"},
+      {"id", "<string>", 'i', "Sample ID column (defaults to first column)"},
+      {"kinship", "<file>", 'k', "Kinship file"},
+      {"logit", "", 'b', "Enable logistic model"},
+      {"min-mac", "<int>", '\x02', "Minimum minor allele count (default: 1)"},
+      {"never-sparse", "", '\x01', "Disables sparse optimizations"},
+      {"no-sparse", "", '\x01', ""},
+      {"always-sparse", "", '\x01', "Forces sparse optimizations even for dense file records"},
+      {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
+      {"pheno", "<column>", 'p', "Phenotype column"},
+      {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
+      {"trust-info", "", '\x01', "Uses AC and AN INFO fields instead of computing values"},
+      {"wgeno", "<file>", '\x02', "Path to thinned genotypes used for fitting whole genome model"}
     });
 
     return additional_options;
