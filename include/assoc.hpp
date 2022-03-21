@@ -11,11 +11,18 @@
 #include "getopt_wrapper.hpp"
 
 #include <savvy/reader.hpp>
+#include <xtensor/xarray.hpp>
+#include <xtensor/xview.hpp>
+#include <xtensor/xadapt.hpp>
+#include <xtensor/xrandom.hpp>
+#include <xtensor-blas/xlinalg.hpp>
 
 #include <string>
 #include <vector>
 #include <fstream>
 #include <getopt.h>
+
+typedef double scalar_type;
 
 class assoc_prog_args : public getopt_wrapper
 {
@@ -106,7 +113,7 @@ public:
   bool trust_info() const { return trust_info_; }
   bool help_is_set() const { return help_; }
 
-  bool update_fmt_field(const savvy::reader& geno_file)
+  bool update_fmt_field(const savvy::reader& geno_file, const std::vector<std::string>& field_priority)
   {
     std::unordered_set<std::string> fmt_avail;
 
@@ -115,10 +122,14 @@ public:
 
     if (fmt_field_.empty())
     {
-      if (fmt_avail.find("DS") != fmt_avail.end()) fmt_field_ = "DS";
-      else if (fmt_avail.find("HDS") != fmt_avail.end()) fmt_field_ = "HDS";
-      else if (fmt_avail.find("GT") != fmt_avail.end()) fmt_field_ = "GT";
-      else return std::cerr << "Error: file must contain DS, HDS, or GT format fields\n", false;
+      for (auto it = field_priority.begin(); fmt_field_.empty() && it != field_priority.end(); ++it)
+      {
+        if (fmt_avail.find(*it) != fmt_avail.end())
+          fmt_field_ = *it;
+      }
+
+      if (fmt_field_.empty())
+        return std::cerr << "Error: file must contain DS, HDS, or GT format fields\n", false;
       std::cerr << "Notice: --fmt-field not specified so auto selecting " << fmt_field_ << std::endl;
     }
     else
@@ -228,5 +239,14 @@ public:
     return true;
   }
 };
+
+struct phenotype_file_data
+{
+  std::vector<std::string> ids;
+  std::vector<scalar_type> resp_data;
+  std::vector<std::vector<scalar_type>> cov_data;
+};
+
+bool load_phenotypes(const assoc_prog_args& args, savvy::reader& geno_file, xt::xtensor<scalar_type, 1>& pheno_vec, xt::xtensor<scalar_type, 2>& cov_mat, std::vector<std::string>& sample_intersection);
 
 #endif // SAVANT_ASSOC_HPP

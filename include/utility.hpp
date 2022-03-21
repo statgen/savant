@@ -71,6 +71,73 @@ struct utility
     }
 
   }
+
+  // [CHROM]:[POS]_[REF]/[ALT]
+  static savvy::site_info marker_id_to_site_info(std::string::const_iterator beg, std::string::const_iterator end)
+  {
+    auto colon_it = std::find(beg, end, ':');
+    std::string chrom(beg, colon_it);
+    if (colon_it != end)
+    {
+      auto underscore_it = std::find(++colon_it, end, '_');
+      std::uint64_t pos = static_cast<std::uint64_t>(std::atoll(std::string(colon_it, underscore_it).c_str()));
+      if (underscore_it != end)
+      {
+        auto slash_it = std::find(++underscore_it, end, '/');
+        std::string ref(underscore_it, slash_it);
+        if (slash_it != end)
+        {
+          std::string alt(++slash_it, end);
+          return savvy::site_info{std::move(chrom), std::uint32_t(pos), std::move(ref), {std::move(alt)}};
+        }
+      }
+    }
+
+    return savvy::site_info{};
+  }
+
+  static std::tuple<std::string, std::list<savvy::site_info>> parse_marker_group_line(const std::string& input)
+  {
+    std::tuple<std::string, std::list<savvy::site_info>> ret;
+    auto delim_it = std::find(input.begin(), input.end(), '\t');
+    if (delim_it != input.end())
+    {
+      std::get<0>(ret) = std::string(input.begin(), delim_it);
+      ++delim_it;
+
+      std::string::const_iterator next_delim_it;
+      while ((next_delim_it = std::find(delim_it, input.end(), '\t')) != input.end())
+      {
+        std::get<1>(ret).emplace_back(marker_id_to_site_info(delim_it, next_delim_it));
+        delim_it = next_delim_it + 1;
+      }
+
+      std::get<1>(ret).emplace_back(marker_id_to_site_info(delim_it, input.end()));
+    }
+
+    return ret;
+  }
+
+  static std::vector<savvy::genomic_region> sites_to_regions(const std::list<savvy::site_info>& un_merged_regions)
+  {
+    std::vector<savvy::genomic_region> ret;
+
+    for (auto it = un_merged_regions.begin(); it != un_merged_regions.end(); ++it)
+    {
+      if (ret.empty() || ret.back().chromosome() != it->chromosome())
+      {
+        ret.emplace_back(it->chromosome(), it->position(), it->position());
+      }
+      else
+      {
+        std::uint64_t from = std::min<std::uint64_t>(ret.back().from(), it->position());
+        std::uint64_t to = std::max<std::uint64_t>(ret.back().to(), it->position());
+        ret.back() = savvy::genomic_region(ret.back().chromosome(), from, to);
+      }
+    }
+
+    return ret;
+  }
 };
 
 #endif // SAVANT_UTILITY_HPP
