@@ -42,6 +42,7 @@ private:
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
   double min_mac_ = 1.0;
+  double min_maf_ = 0.f;
   bool no_sparse_ = false;
   bool always_sparse_ = false;
   bool logit_ = false;
@@ -59,6 +60,7 @@ private:
       {"kinship", "<file>", 'k', "Kinship file"},
       {"logit", "", 'b', "Enable logistic model"},
       {"min-mac", "<int>", '\x02', "Minimum minor allele count (default: 1)"},
+      {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
       {"never-sparse", "", '\x01', "Disables sparse optimizations"},
       {"no-sparse", "", '\x01', ""},
       {"always-sparse", "", '\x01', "Forces sparse optimizations even for dense file records"},
@@ -107,6 +109,7 @@ public:
   const std::string& kinship_file_path() const { return kinship_file_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   double min_mac() const { return min_mac_; }
+  double min_maf() const { return min_maf_; }
   bool sparse_disabled() const { return no_sparse_; }
   bool force_sparse() const { return always_sparse_; }
   bool logit_enabled() const { return logit_; }
@@ -171,6 +174,10 @@ public:
         if (std::string("min-mac") == long_options_[long_index].name)
         {
           min_mac_ = std::atof(optarg ? optarg : "");
+        }
+        else if (std::string("min-maf") == long_options_[long_index].name)
+        {
+          min_maf_ = std::atof(optarg ? optarg : "");
         }
         else if (std::string("fmt-field") == long_options_[long_index].name)
         {

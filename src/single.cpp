@@ -138,6 +138,7 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
 
     if (an == 0) continue;
     if (mac < args.min_mac()) continue;
+    if (maf < args.min_maf()) continue;
 
     auto stats = is_sparse ? mdl.test_single(sparse_geno, ac + missing_cnt * af) : mdl.test_single(dense_geno, ac + missing_cnt * af);
     output_file << var.chromosome()
