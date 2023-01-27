@@ -376,7 +376,7 @@ int single_main(int argc, char** argv)
   }
 #endif
   if (false)
-    return run_collapse(args, geno_file, linear_model(xresp, xcov));
+    return run_collapse(args, geno_file, linear_model(xresp, xcov, args.invnorm()));
 
   if (args.whole_genome_file_path().size())
   {
@@ -430,7 +430,7 @@ int single_main(int argc, char** argv)
     }
 
 
-    return run_single(args, geno_file, whole_genome_model(xresp, xcov, xgeno, 10000, 0.0001, 1e-5, 1.0));
+    return run_single(args, geno_file, whole_genome_model(xresp, xcov, xgeno, 10000, 0.0001, 1e-5, 1.0, args.invnorm()));
   }
   else if (args.kinship_file_path().size())
   {
@@ -512,7 +512,7 @@ int single_main(int argc, char** argv)
     }
     else
     {
-      return run_single(args, geno_file, linear_model(xresp, xcov));
+      return run_single(args, geno_file, linear_model(xresp, xcov, args.invnorm()));
     }
   }
 

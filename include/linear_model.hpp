@@ -7,6 +7,8 @@
 #ifndef SAVANT_LINEAR_MODEL_HPP
 #define SAVANT_LINEAR_MODEL_HPP
 
+#include "inv_norm.hpp"
+
 #include <savvy/compressed_vector.hpp>
 
 #include <xtensor.hpp>
@@ -46,7 +48,7 @@ public:
     */
 
 
-  linear_model(const res_t& y, const cov_t& x_orig)
+  linear_model(const res_t& y, const cov_t& x_orig, bool invnorm)
   {
     using namespace xt;
     using namespace xt::linalg;
@@ -55,6 +57,8 @@ public:
     auto pbetas = dot(dot(pinv(dot(transpose(x), x)), transpose(x)), y);
 
     residuals_ = y - dot(x, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals_);
     s_y_ = sum(residuals_)();
     s_yy_ = dot(residuals_, residuals_)();
   }

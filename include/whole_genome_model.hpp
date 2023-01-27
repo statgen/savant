@@ -110,7 +110,7 @@ public:
 class whole_genome_model : public linear_model
 {
 public:
-  whole_genome_model(const res_t& y, const cov_t& x_orig, const xt::xtensor<float, 2>& geno_matrix, std::size_t max_epochs, double learning_rate, double tolerance, double lambda) : linear_model(y, x_orig)
+  whole_genome_model(const res_t& y, const cov_t& x_orig, const xt::xtensor<float, 2>& geno_matrix, std::size_t max_epochs, double learning_rate, double tolerance, double lambda, bool invnorm) : linear_model(y, x_orig, invnorm)
   {
     ridge_regression reg;
 //    reg.fit(xt::view(residuals_, xt::range(0, 2504)), geno_matrix, 0.0);

@@ -2,6 +2,7 @@
 #include <functional>
 #include <cstdint>
 #include <algorithm>
+#include <type_traits>
 
 /*
  * Adapted from https://github.com/hyunminkang/invNorm
@@ -10,9 +11,12 @@
 double stdnormal_cdf(double u);
 double stdnormal_inv(double p);
 
-template <typename T>
-void inverse_normalize(std::vector<T>& vec, std::vector<std::reference_wrapper<T>>& rank_vec)
+//
+template <typename VecT>
+typename std::enable_if<std::is_floating_point<typename VecT::value_type>::value, void>::type
+inverse_normalize(VecT& vec, std::vector<std::reference_wrapper<typename VecT::value_type>>& rank_vec)
 {
+  typedef typename VecT::value_type T;
   std::size_t n = vec.size();
   rank_vec.assign(vec.begin(), vec.end());
 
@@ -38,9 +42,9 @@ void inverse_normalize(std::vector<T>& vec, std::vector<std::reference_wrapper<T
   }
 }
 
-template <typename T>
-void inverse_normalize(std::vector<T>& vec)
+template <typename VecT>
+void inverse_normalize(VecT& vec)
 {
-  std::vector<std::reference_wrapper<T>> tmp;
+  std::vector<std::reference_wrapper<typename VecT::value_type>> tmp;
   inverse_normalize(vec, tmp);
 }

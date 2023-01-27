@@ -201,7 +201,7 @@ int burden_main(int argc, char** argv)
 
   std::ofstream output_file(args.output_path(), std::ios::binary);
 
-  linear_model mdl(xresp, xcov);
+  linear_model mdl(xresp, xcov, args.invnorm());
 
   output_file << "#group_id\tn_variants\t" << mdl << std::endl;
   shrinkwrap::istream groups_file(args.groups_file().empty() ? args.regions_file() : args.groups_file());

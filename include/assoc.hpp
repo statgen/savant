@@ -36,7 +36,7 @@ private:
   std::string geno_path_;
   std::string pheno_path_;
   std::string output_path_ = "/dev/stdout";
-  std::string debug_log_path_ = "/dev/stdnull";
+  std::string debug_log_path_ = "/dev/null";
   std::string wgeno_file_path_;
   std::string kinship_file_path_;
   std::string fmt_field_ = "";
@@ -48,6 +48,7 @@ private:
   bool logit_ = false;
   bool trust_info_ = false;
   bool help_ = false;
+  bool invnorm_ = false;
 private:
   static std::vector<option_with_desc>& merge_longopts(std::vector<option_with_desc>& additional_options)
   {
@@ -57,6 +58,7 @@ private:
       {"fmt-field", "<string>", '\x02', "Format field to use (DS, HDS, or GT)"},
       {"help", "", 'h', "Print Usage"},
       {"id", "<string>", 'i', "Sample ID column (defaults to first column)"},
+      {"inv-norm", "", '\x01', "Inverse normalize response"},
       {"kinship", "<file>", 'k', "Kinship file"},
       {"logit", "", 'b', "Enable logistic model"},
       {"min-mac", "<int>", '\x02', "Minimum minor allele count (default: 1)"},
@@ -115,6 +117,7 @@ public:
   bool logit_enabled() const { return logit_; }
   bool trust_info() const { return trust_info_; }
   bool help_is_set() const { return help_; }
+  bool invnorm() const { return invnorm_; }
 
   bool update_fmt_field(const savvy::reader& geno_file, const std::vector<std::string>& field_priority)
   {
@@ -164,6 +167,10 @@ public:
         else if (std::string("trust-info") == long_options_[long_index].name)
         {
           trust_info_ = true;
+        }
+        else if (std::string("inv-norm") == long_options_[long_index].name)
+        {
+          invnorm_ = true;
         }
         else
         {
