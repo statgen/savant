@@ -90,7 +90,7 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
   auto start = std::chrono::steady_clock::now();
   std::ofstream output_file(args.output_path(), std::ios::binary);
   //output_file <<  "#chrom\tpos\tmaf\tmac\tbeta\tse\tt\tpval\n";
-  output_file << "#chrom\tpos\tmaf\tmac\t" << mdl << std::endl;
+  output_file << "#chrom\tpos\tref\talt\tvariant_id\tmaf\tmac\t" << mdl << std::endl;
 
   savvy::variant var;
   savvy::compressed_vector<scalar_type> sparse_geno;
@@ -143,6 +143,9 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
     auto stats = is_sparse ? mdl.test_single(sparse_geno, ac + missing_cnt * af) : mdl.test_single(dense_geno, ac + missing_cnt * af);
     output_file << var.chromosome()
                 << "\t" << var.position()
+                << "\t" << var.ref()
+                << "\t" << (var.alts().empty() ? "." : var.alts()[0])
+                << "\t" << var.id()
                 << "\t" << maf
                 << "\t" << mac
                 << "\t" << stats << "\n";
