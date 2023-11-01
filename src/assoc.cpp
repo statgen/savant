@@ -10,6 +10,8 @@ bool parse_pheno_file(const assoc_prog_args& args, phenotype_file_data& dest)
   //std::vector<std::size_t> covariate_idxs(args.cov_columns().size(), std::size_t(-1));
 
   std::ifstream pheno_file(args.pheno_path(), std::ios::binary);
+  if (!pheno_file)
+    return std::cerr << "Error: could not open pheno file\n", false;
 
   const std::size_t id_code = 1;
   const std::size_t resp_code = 2;
@@ -95,9 +97,10 @@ bool parse_pheno_file(const assoc_prog_args& args, phenotype_file_data& dest)
         }
       }
     }
+    return true;
   }
 
-  return true;
+  return std::cerr << "Error: Pheno file empty\n", false;
 }
 
 bool load_phenotypes(const assoc_prog_args& args, savvy::reader& geno_file, xt::xtensor<scalar_type, 1>& pheno_vec, xt::xtensor<scalar_type, 2>& cov_mat, std::vector<std::string>& sample_intersection)
@@ -127,6 +130,10 @@ bool load_phenotypes(const assoc_prog_args& args, savvy::reader& geno_file, xt::
   }
 
   sample_intersection = geno_file.subset_samples(samples_with_phenotypes);
+  if (sample_intersection.size() == 0)
+    return std::cerr << "Error: no phenotype sample IDs overlap IDs in genotype file\n", false;
+  if (sample_intersection.size() == 1)
+    return std::cerr << "Error: only one phenotype sample ID overlaps IDs in genotype file\n", false;
 
   pheno_vec = xt::xtensor<scalar_type, 1>::from_shape({sample_intersection.size()});
   cov_mat = xt::xtensor<scalar_type, 2>::from_shape({sample_intersection.size(), args.cov_columns().size()});
