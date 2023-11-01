@@ -1,4 +1,4 @@
-statgen/savvy@9ba1ab13e8afdbd09d4ae63bdf9fd0ac63229f99
+statgen/savvy@18d97be615fb4adbfa9a1518243739ae1be8f97e
 jonathonl/omp@develop
 xtensor-stack/xtl
 xtensor-stack/xtensor
