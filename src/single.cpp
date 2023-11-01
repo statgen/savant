@@ -92,11 +92,13 @@ int run_single(const single_prog_args& args, savvy::reader& geno_file, const Mod
   //output_file <<  "#chrom\tpos\tmaf\tmac\tbeta\tse\tt\tpval\n";
   output_file << "#chrom\tpos\tref\talt\tvariant_id\tmaf\tmac\t" << mdl << std::endl;
 
+  const std::vector<std::string> pass{"PASS"};
   savvy::variant var;
   savvy::compressed_vector<scalar_type> sparse_geno;
   std::vector<scalar_type> dense_geno;
   while (geno_file >> var)
   {
+    if (args.pass_only() && var.filters() != pass) continue;
     std::size_t ploidy = 0;
     std::int64_t an = 0;
     std::int64_t missing_cnt = 0;

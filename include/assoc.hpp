@@ -49,6 +49,7 @@ private:
   bool trust_info_ = false;
   bool help_ = false;
   bool invnorm_ = false;
+  bool pass_only_ = false;
 private:
   static std::vector<option_with_desc>& merge_longopts(std::vector<option_with_desc>& additional_options)
   {
@@ -70,6 +71,7 @@ private:
       {"pheno", "<column>", 'p', "Phenotype column"},
       {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
       {"trust-info", "", '\x01', "Uses AC and AN INFO fields instead of computing values"},
+      {"pass-only", "", '\x01', "Only test PASS variants"},
       {"wgeno", "<file>", '\x02', "Path to thinned genotypes used for fitting whole genome model"}
     });
 
@@ -118,6 +120,7 @@ public:
   bool trust_info() const { return trust_info_; }
   bool help_is_set() const { return help_; }
   bool invnorm() const { return invnorm_; }
+  bool pass_only() const { return pass_only_; }
 
   bool update_fmt_field(const savvy::reader& geno_file, const std::vector<std::string>& field_priority)
   {
@@ -171,6 +174,10 @@ public:
         else if (std::string("inv-norm") == long_options_[long_index].name)
         {
           invnorm_ = true;
+        }
+        else if (std::string("pass-only") == long_options_[long_index].name)
+        {
+          pass_only_ = true;
         }
         else
         {
