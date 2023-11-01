@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <type_traits>
+#include <assert.h>
 
 /*
  * Adapted from https://github.com/hyunminkang/invNorm
@@ -40,6 +41,11 @@ inverse_normalize(VecT& vec, std::vector<std::reference_wrapper<typename VecT::v
       left = i;
     }
   }
+
+  assert((left + n)/2. <= n);
+  T v(stdnormal_inv((left + n)/2./n));
+  for (std::size_t j = left; j < n; ++j)
+    rank_vec[j].get() = v;
 }
 
 template <typename VecT>
