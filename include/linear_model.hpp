@@ -35,6 +35,8 @@ public:
     scalar_type se;
     scalar_type t;
     scalar_type r2;
+
+    static std::string header_column_names() { return "pvalue\tbeta\tse\ttstat\tr2"; }
   };
 
   /*
@@ -163,6 +165,54 @@ public:
     ret.se = std_err;
     ret.t = t;
     ret.r2 = r * r;
+
+    return ret;
+  }
+
+  template <typename GenoT>
+  static stats_t ols(const std::vector<GenoT>& x, const res_t& y, scalar_type s_x, scalar_type s_y, scalar_type s_yy)
+  {
+    assert(y.size() == x.size());
+    const std::size_t n = x.size();
+    //scalar_type s_x{}; //     = std::accumulate(x.begin(), x.end(), scalar_type());
+    scalar_type s_xx{}; //    = std::inner_product(x.begin(), x.end(), x.begin(), scalar_type());
+    scalar_type s_xy{}; //    = std::inner_product(x.begin(), x.end(), y.begin(), scalar_type());
+
+    for (std::size_t i = 0; i < n; ++i)
+    {
+      //s_x += x[i];
+      s_xx += x[i] * x[i];
+      s_xy += x[i] * y[i];
+    }
+
+    const scalar_type m = (n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+    const scalar_type b = (s_y - m * s_x) / n;
+    auto fx             = [m,b](scalar_type x) { return m * x + b; };
+    const scalar_type x_mean  = s_x / n;
+
+    //    scalar_type se_line{};
+    //    scalar_type se_x_mean{};
+    //    for (std::size_t i = 0; i < n; ++i)
+    //    {
+    //      se_line += square(y[i] - fx(x[i]));
+    //      se_x_mean += square(x[i] - x_mean);
+    //    }
+
+    const scalar_type dof     = n - 2;
+    //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    scalar_type t = m / std_err;
+    scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
+
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r; //1 - se_line / se_y_mean;
 
     return ret;
   }

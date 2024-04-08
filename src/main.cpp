@@ -12,6 +12,7 @@
 #include "tcdf.hpp"
 #include "logistic_score_model.hpp"
 #include "linear_model.hpp"
+#include "qtl.hpp"
 
 #include <savvy/reader.hpp>
 
@@ -1042,6 +1043,8 @@ int main(int argc, char** argv)
     return pca_main(argc, argv);
   else if (args.sub_command() == "grm")
     return grm_main(argc--, argv++);
+  else if (args.sub_command() == "qtl")
+    return qtl_main(argc--, argv++);
 
   std::cerr << "Invalid sub-command (" << args.sub_command() << ")" << std::endl;
   args.print_usage(std::cerr);

@@ -12,7 +12,7 @@ find_package(Threads REQUIRED)
 find_library(OMP_LIB omp)
 #-DBOOST_UBLAS_NDEBUG
 
-add_executable(savant src/main.cpp src/assoc.cpp src/single.cpp src/burden.cpp src/plot.cpp src/pca.cpp src/fit.cpp src/grm.cpp src/inv_norm.cpp)
+add_executable(savant src/main.cpp src/assoc.cpp src/single.cpp src/burden.cpp src/qtl.cpp src/plot.cpp src/pca.cpp src/fit.cpp src/grm.cpp src/inv_norm.cpp src/bed_file.cpp)
 target_compile_definitions(savant PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
 target_include_directories(savant PRIVATE include ${Boost_INCLUDE_DIRS})
 target_link_libraries(savant savvy xtensor-blas ${OMP_LIB} ${CMAKE_THREAD_LIBS_INIT})

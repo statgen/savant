@@ -1,3 +1,6 @@
+#ifndef SAVANT_INV_NORML_HPP
+#define SAVANT_INV_NORML_HPP
+
 #include <vector>
 #include <functional>
 #include <cstdint>
@@ -54,3 +57,5 @@ void inverse_normalize(VecT& vec)
   std::vector<std::reference_wrapper<typename VecT::value_type>> tmp;
   inverse_normalize(vec, tmp);
 }
+
+#endif // SAVANT_INV_NORML_HPP
