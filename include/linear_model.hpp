@@ -170,7 +170,7 @@ public:
   }
 
   template <typename GenoT>
-  static stats_t ols(const std::vector<GenoT>& x, const res_t& y, scalar_type s_x, scalar_type s_y, scalar_type s_yy)
+  static stats_t ols(const std::vector<GenoT>& x, const res_t& y, scalar_type s_x, scalar_type s_y, scalar_type s_yy, std::size_t dof)
   {
     assert(y.size() == x.size());
     const std::size_t n = x.size();
@@ -198,7 +198,7 @@ public:
     //      se_x_mean += square(x[i] - x_mean);
     //    }
 
-    const scalar_type dof     = n - 2;
+    //const scalar_type dof     = n - 2;
     //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
     const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;

@@ -80,7 +80,7 @@ bool parse_covariates_file(const assoc_prog_args& args, const std::vector<std::s
   return true;
 }
 
-class residualizer
+class residualizer_pinv
 {
 public:
   typedef double scalar_type;
@@ -90,23 +90,26 @@ private:
   cov_t x_;
   cov_t m_;
 public:
-  residualizer() {}
-  residualizer(const cov_t& x_orig)
+  residualizer_pinv() {}
+  residualizer_pinv(const cov_t& x_orig)
   {
     using namespace xt;
     using namespace xt::linalg;
-
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
     x_ = x_orig;
 
     m_ = xt::eval(dot(pinv(dot(transpose(x_), x_)), transpose(x_)));
   }
+
+  std::size_t n_variables() const { return x_.shape()[1]; }
+  std::size_t n_samples() const { return x_.shape()[0]; }
 
   template <typename T>
   res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
   {
     using namespace xt;
     using namespace xt::linalg;
-    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+
     auto pbetas = dot(m_, v);
     res_t residuals = v - dot(x_, pbetas);
     if (invnorm)
@@ -130,14 +133,120 @@ public:
 
 };
 
+class residualizer_inv
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  cov_t x_;
+  cov_t m_;
+public:
+  residualizer_inv() {}
+  residualizer_inv(const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    x_ = x_orig;
+
+    m_ = xt::eval(dot(inv(dot(transpose(x_), x_)), transpose(x_)));
+  }
+
+  std::size_t n_variables() const { return x_.shape()[1]; }
+  std::size_t n_samples() const { return x_.shape()[0]; }
+
+  template <typename T>
+  res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const std::vector<T>& v_std, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto v = xt::adapt(v_std, {v_std.size()});
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return std::vector<scalar_type> (residuals.begin(), residuals.end());
+  }
+
+};
+
+class residualizer_qr
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  cov_t q_;
+public:
+  residualizer_qr() {}
+  residualizer_qr(const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    cov_t r;
+    std::tie(q_, r) = qr(x_orig);
+  }
+
+  std::size_t n_variables() const { return q_.shape()[1]; }
+  std::size_t n_samples() const { return q_.shape()[0]; }
+
+  template <typename T>
+  res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    res_t residuals = v - dot(dot(v, q_), transpose(q_));
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const std::vector<T>& v_std, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    auto v = xt::adapt(v_std, {v_std.size()});
+
+    res_t residuals = v - dot(dot(v, q_), transpose(q_));
+    if (invnorm)
+      inverse_normalize(residuals);
+    return std::vector<scalar_type> (residuals.begin(), residuals.end());
+  }
+
+};
+
+typedef residualizer_pinv residualizer;
+
 bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector<residualizer>& residualizers, std::vector<std::vector<std::size_t>> subset_non_missing_map, /* std::deque<std::vector<std::int8_t>>& genos,*/ savvy::reader& geno_file, std::ostream& output_file, const qtl_prog_args& args)
 {
   if (phenos.empty())
     return false;
+
   auto window_size = args.window_size();
   if (window_size >=0)
   {
-    std::int64_t window_start = std::max(1ll, phenos.front().beg() + 1 - window_size);
+    std::int64_t window_start = std::max(std::int64_t(1), phenos.front().beg() + 1 - window_size);
     std::int64_t window_end = window_start;
     for (auto it = phenos.begin(); it != phenos.end(); ++it)
     {
@@ -152,14 +261,14 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
   std::vector<std::vector<scalar_type>> pheno_resids(phenos.size());
   for (std::size_t i = 0; i < phenos.size(); ++i)
   {
-    pheno_resids[i] = residualizers[i](phenos[i].data(), args.invnorm());
+    pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i].data(), args.invnorm());
     s_y[i] = std::accumulate(pheno_resids[i].begin(),  pheno_resids[i].end(), scalar_type());
     s_yy[i] = std::inner_product(pheno_resids[i].begin(),  pheno_resids[i].end(), pheno_resids[i].begin(), scalar_type());
   }
 
   std::vector<std::int8_t> geno;
   std::vector<scalar_type> geno_sub;
-  savvy::variant var;
+  savvy::variant var; std::size_t progress = 0;
   while (geno_file.read(var))
   {
     var.get_format("GT", geno);
@@ -199,9 +308,22 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
           if (mac < args.min_mac()) continue;
           if (maf < args.min_maf()) continue;
 
-          geno_sub = residualizers[pheno_idx](geno_sub);
+          geno_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
 
-          linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), std::accumulate(geno_sub.begin(), geno_sub.end(), scalar_type()), s_y[pheno_idx], s_yy[pheno_idx]);
+//          double mean = std::accumulate(geno_sub.begin(), geno_sub.end(), 0.) / geno_sub.size();
+//          double stdev = std::sqrt(std::max(0., std::inner_product(geno_sub.begin(), geno_sub.end(), geno_sub.begin(), 0.0) / geno_sub.size() - mean*mean));
+//          double stdev2 = 0.;
+//          for (auto it = geno_sub.begin(); it != geno_sub.end(); ++it)
+//            stdev2 += (mean - *it) * (mean - *it);
+//          stdev2 = std::sqrt(stdev2 / geno_sub.size());
+//
+//          for(auto& element : geno_sub)
+//          {
+//            element = (element - mean);
+//            element = (element / stdev) * stdev_before;
+//          }
+
+          linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), std::accumulate(geno_sub.begin(), geno_sub.end(), scalar_type()), s_y[pheno_idx], s_yy[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
 
           output_file << var.chromosome()
                       << "\t" << var.position()
@@ -210,9 +332,10 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
                       << "\t" << var.id()
                       << "\t" << maf
                       << "\t" << mac
+                      << "\t" << an/ploidy
                       << "\t" << phenos[pheno_idx].pheno_id()
                       << "\t" << phenos[pheno_idx].chrom()
-                      << "\t" << phenos[pheno_idx].beg()
+                      << "\t" << phenos[pheno_idx].beg() + 1
                       << "\t" << phenos[pheno_idx].end()
                       << "\t" << stats << "\n";
 
@@ -275,8 +398,10 @@ int qtl_main(int argc, char** argv)
   if (!parse_covariates_file(args, sample_intersection, cov_mat))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
+  cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
+
   shrinkwrap::bgzf::ostream output_file(args.output_path());
-  output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tpheno_id\tpheno_chrom\tpheno_beg\tpheno_end\t" << linear_model::stats_t::header_column_names() << std::endl;
+  output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\tpheno_id\tpheno_chrom\tpheno_beg\tpheno_end\t" << linear_model::stats_t::header_column_names() << std::endl;
 
   std::size_t batch_size = 10;
   std::vector<bed_file::record> phenos;
@@ -293,7 +418,7 @@ int qtl_main(int argc, char** argv)
     {
       keep_samples.resize(0);
       if (phenos[i].data().size() != subset_non_missing_map[i].size())
-        return std::cerr << "Error: size mismatch at " << __FILE_NAME__ << ":" << __LINE__ << " (this should not happen)\n", false;
+        return std::cerr << "Error: size mismatch at " << __FILE__ << ":" << __LINE__ << " (this should not happen)\n", false;
 
       //pheno_sub[i].resize(phenos[i].data().size());
       subset_non_missing_map[i] = phenos[i].remove_missing();
@@ -302,7 +427,24 @@ int qtl_main(int argc, char** argv)
         if (subset_non_missing_map[i][j] <= j)
           keep_samples.push_back(j);
       }
-      residualizers[i] = residualizer(xt::view(cov_mat, xt::keep(keep_samples), xt::all()));
+//      if (keep_samples.size() != subset_non_missing_map[i].size())
+//        throw std::runtime_error("Missing detected at " + std::to_string(i));
+      if (i == 0 || keep_samples.size() != subset_non_missing_map[i].size() || keep_samples.size() != residualizers[0].n_samples())
+      {
+        residualizers[i] = residualizer(xt::view(cov_mat, xt::keep(keep_samples), xt::all()));
+      }
+      else
+      {
+        residualizers[i] = residualizers[0];
+      }
+    }
+
+    for (std::size_t i = 0; i < residualizers.size(); ++i)
+    {
+      if (residualizers[i].n_samples() != subset_non_missing_map[0].size())
+        break;
+      if (i + 1 == residualizers.size())
+        residualizers.resize(1);
     }
 
     if (!process_cis_batch(phenos, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output_file, args))

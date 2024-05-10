@@ -34,7 +34,7 @@ public:
 
     const std::string& chrom() const { return chrom_; }
     const std::string& pheno_id() const { return pheno_id_; }
-    std::int64_t beg() const { return beg_ + 1; }
+    std::int64_t beg() const { return beg_; }
     std::int64_t end() const { return end_; }
     const std::vector<data_type>& data() const { return data_; }
     std::vector<std::size_t> remove_missing();

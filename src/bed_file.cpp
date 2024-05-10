@@ -59,19 +59,23 @@ bool bed_file::record::deserialize(bed_file::record& dest, std::istream& is, con
   std::size_t bed_idx = 0;
   std::size_t max_idx = 0;
 
-  char* d = nullptr;
+  const char* d = nullptr;
   char delim = '\t';
-  char* s = data_line.data();
-  char*const e = s + data_line.size();
+  const char* s = data_line.data();
+  const char*const e = s + data_line.size();
   while ((d = std::find(s, e,  delim)) != e)
   {
     if (bed_idx >= pheno_to_geno_map.size())
       return std::cerr << "Error: inconsistent number of columns in BED file\n", false;
+
     //dest.data_.emplace_back(std::string(s, d));
     //*d = '\0';
     if (pheno_to_geno_map[bed_idx] < dest.data_.size())
     {
-      dest.data_[pheno_to_geno_map[bed_idx]] = std::atof(s);
+      if (std::tolower(*s) == 'n')
+        dest.data_[pheno_to_geno_map[bed_idx]] = savvy::typed_value::missing_value<data_type>();
+      else
+        dest.data_[pheno_to_geno_map[bed_idx]] = std::atof(s);
       max_idx = std::max(max_idx, pheno_to_geno_map[bed_idx]);
     }
     s = d ? d + 1 : d;
