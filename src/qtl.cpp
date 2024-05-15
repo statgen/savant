@@ -398,7 +398,8 @@ int qtl_main(int argc, char** argv)
   if (!parse_covariates_file(args, sample_intersection, cov_mat))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
-  cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
+  //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
+  cov_mat = cov_mat - xt::mean(cov_mat, {0});
 
   shrinkwrap::bgzf::ostream output_file(args.output_path());
   output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\tpheno_id\tpheno_chrom\tpheno_beg\tpheno_end\t" << linear_model::stats_t::header_column_names() << std::endl;
