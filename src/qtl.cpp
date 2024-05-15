@@ -266,8 +266,9 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
     s_yy[i] = std::inner_product(pheno_resids[i].begin(),  pheno_resids[i].end(), pheno_resids[i].begin(), scalar_type());
   }
 
-  std::vector<std::int8_t> geno;
-  std::vector<scalar_type> geno_sub;
+  savvy::compressed_vector<std::int8_t> geno;
+  savvy::compressed_vector<scalar_type> geno_sub;
+  std::vector<scalar_type> geno_sub_dense;
   savvy::variant var; std::size_t progress = 0;
   while (geno_file.read(var))
   {
@@ -283,14 +284,15 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
           std::size_t ploidy = an / subset_non_missing_map[pheno_idx].size();
           float ac = 0.f;
           geno_sub.resize(0);
-          geno_sub.resize(phenos[pheno_idx].data().size());
-          for (std::size_t i = 0; i < geno.size(); ++i)
+          geno_sub.resize(phenos[pheno_idx].data().size() * ploidy);
+          for (auto it = geno.begin(); it != geno.end(); ++it)
           {
-            if (subset_non_missing_map[pheno_idx][i/ploidy] < geno_sub.size())
+            std::size_t sub_offset = subset_non_missing_map[pheno_idx][it.offset()/ploidy] + (it.offset() % ploidy);
+            if (sub_offset < geno_sub.size())
             {
-              if (geno[i] == alt_idx)
+              if (*it == alt_idx)
               {
-                geno_sub[subset_non_missing_map[pheno_idx][i / ploidy]] += 1;
+                geno_sub[sub_offset] = 1;
                 ac += 1.f;
               }
             }
@@ -308,7 +310,10 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
           if (mac < args.min_mac()) continue;
           if (maf < args.min_maf()) continue;
 
-          geno_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
+          savvy::stride_reduce(geno_sub, ploidy, savvy::plus_eov<scalar_type>());
+
+          // TODO: implement sparse residualize
+          // geno_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
 
 //          double mean = std::accumulate(geno_sub.begin(), geno_sub.end(), 0.) / geno_sub.size();
 //          double stdev = std::sqrt(std::max(0., std::inner_product(geno_sub.begin(), geno_sub.end(), geno_sub.begin(), 0.0) / geno_sub.size() - mean*mean));
@@ -324,7 +329,21 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
 //          }
 
           linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), std::accumulate(geno_sub.begin(), geno_sub.end(), scalar_type()), s_y[pheno_idx], s_yy[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+#if 0
+          geno_sub_dense.clear();
+          geno_sub_dense.resize(geno_sub.size());
+          for (auto it = geno_sub.begin(); it != geno_sub.end(); ++it)
+            geno_sub_dense[it.offset()] = *it;
 
+          scalar_type s_x_dense = std::accumulate(geno_sub_dense.begin(), geno_sub_dense.end(), scalar_type());
+          scalar_type mean = s_x_dense / geno_sub_dense.size();
+          for(auto& element : geno_sub_dense)
+          {
+            element = (element - mean);
+          }
+
+          linear_model::stats_t stats_dense = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), s_x_dense, s_y[pheno_idx], s_yy[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+#endif
           output_file << var.chromosome()
                       << "\t" << var.position()
                       << "\t" << var.ref()
