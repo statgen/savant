@@ -553,7 +553,7 @@ int cis_qtl_main(int argc, char** argv)
 }
 
 template <typename T>
-std::vector<std::size_t> remove_missing(std::vector<T> vec)
+std::vector<std::size_t> remove_missing(std::vector<T>& vec)
 {
   std::vector<std::size_t> subset_mask(vec.size());
 
