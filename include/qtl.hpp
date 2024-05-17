@@ -7,6 +7,7 @@
 #ifndef SAVANT_QTL_HPP
 #define SAVANT_QTL_HPP
 
-int qtl_main(int argc, char** argv);
+int cis_qtl_main(int argc, char** argv);
+int trans_qtl_main(int argc, char** argv);
 
 #endif // SAVANT_QTL_HPP

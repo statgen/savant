@@ -39,6 +39,44 @@ public:
     static std::string header_column_names() { return "pvalue\tbeta\tse\ttstat\tr2"; }
   };
 
+  template <typename T>
+  class variable_stats
+  {
+  private:
+    T sum_;
+    T sum_squared_;
+  public:
+    T sum() const { return sum_; }
+    T sum_squared() const { return sum_squared_; }
+
+    variable_stats() = default;
+
+    variable_stats(const std::vector<T>& vec)
+    {
+      sum_ = std::accumulate(vec.begin(),  vec.end(), T());
+      sum_squared_ = std::inner_product(vec.begin(),  vec.end(), vec.begin(), T());
+    }
+
+    variable_stats(const xt::xtensor<T, 1>& vec)
+    {
+      sum_ = std::accumulate(vec.begin(),  vec.end(), T());
+      sum_squared_ = std::inner_product(vec.begin(),  vec.end(), vec.begin(), T());
+    }
+
+    variable_stats(const savvy::compressed_vector<T>& vec)
+    {
+      bool center = false;
+      sum_ = std::accumulate(vec.begin(),  vec.end(), T());
+      sum_squared_ = std::inner_product(vec.begin(),  vec.end(), vec.begin(), T());
+      if (center)
+      {
+        T mean = sum_ / vec.size();
+        sum_squared_ += (T(-2.) * mean * sum_) + (mean * mean * vec.size()); // (x - m)(x - m) == (xx - 2mx + mm)
+        sum_ = T(0);
+      }
+    }
+  };
+
   /*
     ## calculate the weights for each observation
     v <- exp(reml$linear.predictors) / (1 + exp(reml$linear.predictors))^2
@@ -225,8 +263,8 @@ public:
     const std::size_t n = x.size();
     const scalar_type x_mean = s_x / n;
     // -2.0 * mean * scale * s_x * scale + square(mean * scale) * x.size();
-    scalar_type s_xx = (-2.0 * x_mean * s_x) + (x_mean * x_mean * x.size()); // (x - m)(x - m) == (xx - 2mx + mm)
-    scalar_type s_xy = -x_mean * s_y; // y * (x - mean(x)) = y * x - y * mean(x)
+    scalar_type s_xx{};
+    scalar_type s_xy{};
 
     const auto x_beg = x.begin();
     const auto x_end = x.end();
@@ -262,6 +300,98 @@ public:
     ret.se = std_err;
     ret.t = t;
     ret.r2 = r * r;
+
+    return ret;
+  }
+
+  template <typename GenoT>
+  static stats_t ols(const savvy::compressed_vector<GenoT>& x, const res_t& y, const variable_stats<scalar_type>& x_stats, const variable_stats<scalar_type>& y_stats, std::size_t dof)
+  {
+    scalar_type s_x = x_stats.sum();
+    scalar_type s_xx = x_stats.sum_squared();
+    scalar_type s_y = y_stats.sum();
+    scalar_type s_yy = y_stats.sum_squared();
+
+    assert(y.size() == x.size());
+    const std::size_t n = x.size();
+    //const scalar_type x_mean = s_x / n;
+
+    scalar_type s_xy{};
+    for (auto it = x.begin(); it != x.end(); ++it)
+      s_xy += (*it) * y[it.offset()];
+
+    //const float s_y     = std::accumulate(y.begin(), y.end(), 0.0f);
+    const scalar_type m       = (n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+
+    //    scalar_type se_x_mean{};
+    //    for (auto it = x.begin(); it != x.end(); ++it)
+    //    {
+    //      se_x_mean += square(*it - x_mean);
+    //    }
+    //    se_x_mean += (square(0.0f - x_mean) * scalar_type(n - x.non_zero_size()));
+
+    //scalar_type se2 = 1./(n*(n-2)) * (n*s_yy_ - s_y_*s_y_ - square(m)*(n*s_xx - square(s_x)));
+    scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
+
+    //const scalar_type dof = n - 2;
+    //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    scalar_type t = m / std_err;
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r;
+
+    return ret;
+  }
+
+  template <typename GenoT>
+  static stats_t ols(const std::vector<GenoT>& x, const res_t& y, const variable_stats<scalar_type>& x_stats, const variable_stats<scalar_type>& y_stats, std::size_t dof)
+  {
+    assert(y.size() == x.size());
+    const std::size_t n = x.size();
+    scalar_type s_x = x_stats.sum();
+    scalar_type s_xx = x_stats.sum_squared();
+    scalar_type s_y = y_stats.sum();
+    scalar_type s_yy = y_stats.sum_squared();
+    scalar_type s_xy{}; //    = std::inner_product(x.begin(), x.end(), y.begin(), scalar_type());
+
+    for (std::size_t i = 0; i < n; ++i)
+      s_xy += x[i] * y[i];
+
+    const scalar_type m = (n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+    const scalar_type b = (s_y - m * s_x) / n;
+    //auto fx             = [m,b](scalar_type x) { return m * x + b; };
+    //const scalar_type x_mean  = s_x / n;
+
+    //    scalar_type se_line{};
+    //    scalar_type se_x_mean{};
+    //    for (std::size_t i = 0; i < n; ++i)
+    //    {
+    //      se_line += square(y[i] - fx(x[i]));
+    //      se_x_mean += square(x[i] - x_mean);
+    //    }
+
+    //const scalar_type dof     = n - 2;
+    //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    scalar_type t = m / std_err;
+    scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
+
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r; //1 - se_line / se_y_mean;
 
     return ret;
   }

@@ -1044,7 +1044,7 @@ int main(int argc, char** argv)
   else if (args.sub_command() == "grm")
     return grm_main(argc--, argv++);
   else if (args.sub_command() == "qtl")
-    return qtl_main(argc--, argv++);
+    return trans_qtl_main(argc--, argv++);
 
   std::cerr << "Invalid sub-command (" << args.sub_command() << ")" << std::endl;
   args.print_usage(std::cerr);
