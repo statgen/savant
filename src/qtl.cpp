@@ -14,45 +14,197 @@
 
 #include <cstdlib>
 
-class qtl_prog_args : public assoc_prog_args
+class qtl_prog_args : public getopt_wrapper
 {
 private:
-  std::int64_t window_size_ = 48; //1000000;
+  //std::string sub_command_;
+  //std::vector<option> long_options_;
+  //std::string short_options_;
+  std::string cov_path_;
+  std::string phenotype_field_;
+  std::string geno_path_;
+  std::string pheno_path_;
+  std::string output_path_ = "/dev/stdout";
+  std::string debug_log_path_ = "/dev/null";
+  std::string fmt_field_ = "";
+  std::unique_ptr<savvy::genomic_region> region_;
+  double min_mac_ = 1.0;
+  double min_maf_ = 0.f;
   double max_pval_ = 2.;
+  bool split_output_ = false;
+  bool help_ = false;
+  bool invnorm_ = false;
+  bool pass_only_ = false;
 public:
   qtl_prog_args() :
-    assoc_prog_args("qtl", {
-      {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"}
-    })
+    getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
+      {"cov", "<file>", 'c', "Covariates file"},
+      {"debug-log", "<file>", '\x02', "Enables debug logging and specifies log file"},
+      {"fmt-field", "<string>", '\x02', "Format field to use (DS, HDS, or GT)"},
+      {"help", "", 'h', "Print Usage"},
+      {"inv-norm", "", '\x01', "Inverse normalize response"},
+      {"min-mac", "<int>", '\x02', "Minimum minor allele count (default: 1)"},
+      {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
+      {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
+      {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
+      {"pass-only", "", '\x01', "Only test PASS variants"},
+      {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"},
+      {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"}})
   {
+    //    long_options_.reserve(long_options_.size() + additional_options.size());
+    //    long_options_.insert(--long_options_.end(), additional_options.begin(), additional_options.end());
 
-
+    //    short_options_.reserve((long_options_.size() - 1) * 2);
+    //    std::vector<bool> mask(256, false);
+    //    for (const auto& o : long_options_)
+    //    {
+    //      if (!mask[unsigned(o.val)])
+    //      {
+    //        short_options_ += (char)o.val;
+    //        if (o.has_arg == required_argument)
+    //          short_options_ += ':';
+    //        mask[(unsigned)o.val] = true;
+    //      }
+    //    }
   }
 
-  std::int64_t window_size() const { return window_size_; }
+  virtual ~qtl_prog_args() {}
+
+  const std::string& cov_path() const { return cov_path_; }
+  const std::string& geno_path() const { return geno_path_; }
+  const std::string& pheno_path() const { return pheno_path_; }
+  const std::string& output_path() const { return output_path_; }
+  const std::string& fmt_field() const { return fmt_field_; }
+  const std::string& debug_log_path() const { return debug_log_path_; }
+  const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
+  double min_mac() const { return min_mac_; }
+  double min_maf() const { return min_maf_; }
   double max_pval() const { return max_pval_; }
+  std::int64_t window_size() const { return 48; } // TODO: remove
+  bool split_output() const { return split_output_; }
+  bool help_is_set() const { return help_; }
+  bool invnorm() const { return invnorm_; }
+  bool pass_only() const { return pass_only_; }
+
+  bool update_fmt_field(const savvy::reader& geno_file, const std::vector<std::string>& field_priority)
+  {
+    std::unordered_set<std::string> fmt_avail;
+
+    for (const auto& h : geno_file.format_headers())
+      fmt_avail.insert(h.id);
+
+    if (fmt_field_.empty())
+    {
+      for (auto it = field_priority.begin(); fmt_field_.empty() && it != field_priority.end(); ++it)
+      {
+        if (fmt_avail.find(*it) != fmt_avail.end())
+          fmt_field_ = *it;
+      }
+
+      if (fmt_field_.empty())
+        return std::cerr << "Error: file must contain DS, HDS, or GT format fields\n", false;
+      std::cerr << "Notice: --fmt-field not specified so auto selecting " << fmt_field_ << std::endl;
+    }
+    else
+    {
+      if (fmt_avail.find(fmt_field_) == fmt_avail.end())
+        return std::cerr << "Error: requested format field (" << fmt_field_ << ") not found in file headers\n", false;
+    }
+    return true;
+  }
 
   bool parse(int argc, char** argv)
   {
-    if (!assoc_prog_args::parse(argc, argv))
-      return false;
-
-    optind = 1; // reset getopt for second loop
     int long_index = 0;
     int opt = 0;
-    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index)) != -1)
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str() /*"\x01\x02:bc:ho:p:r:"*/, long_options_.data(), &long_index )) != -1)
     {
       char copt = char(opt & 0xFF);
       switch (copt)
       {
+      case '\x01':
+        if (std::string("inv-norm") == long_options_[long_index].name)
+        {
+          invnorm_ = true;
+        }
+        else if (std::string("pass-only") == long_options_[long_index].name)
+        {
+          pass_only_ = true;
+        }
+        else if (std::string("split-output") == long_options_[long_index].name)
+        {
+          split_output_ = true;
+        }
+        else
+        {
+          return std::cerr << "Error: invalid option " << long_options_[long_index].name << std::endl, false;
+        }
+        break;
       case '\x02':
-        if (std::string("max-pvalue") == long_options_[long_index].name)
+        if (std::string("min-mac") == long_options_[long_index].name)
+        {
+          min_mac_ = std::atof(optarg ? optarg : "");
+        }
+        else if (std::string("min-maf") == long_options_[long_index].name)
+        {
+          min_maf_ = std::atof(optarg ? optarg : "");
+        }
+        else if (std::string("fmt-field") == long_options_[long_index].name)
+        {
+          fmt_field_ = optarg ? optarg : "";
+          if (fmt_field_ != "DS" && fmt_field_ != "HDS" && fmt_field_ != "GT")
+            return std::cerr << "Error: --fmt-field must be DS, HDS, or GT\n", false;
+        }
+        else if (std::string("debug-log") == long_options_[long_index].name)
+        {
+          debug_log_path_ = optarg ? optarg : "";
+        }
+        else if (std::string("max-pvalue") == long_options_[long_index].name)
         {
           max_pval_ = std::atof(optarg ? optarg : "");
         }
-      case '?':
+        else
+        {
+          return std::cerr << "Error: invalid option " << long_options_[long_index].name << std::endl, false;
+        }
+        break;
+      case 'h':
+        help_ = true;
+        return true;
+      case 'c':
+        cov_path_ = optarg ? optarg : "";
+        break;
+      case 'o':
+        output_path_ = optarg ? optarg : "";
+        break;
+      case 'p':
+        phenotype_field_ = optarg ? optarg : "";
+        break;
+      case 'r':
+        region_.reset(new savvy::genomic_region(utility::string_to_region(optarg ? optarg : "")));
+        break;
+      default:
         return false;
       }
+    }
+
+    int remaining_arg_count = argc - optind;
+
+    if (remaining_arg_count == 2)
+    {
+      geno_path_ = argv[optind];
+      pheno_path_ = argv[optind + 1];
+      //phenotype_field_ = argv[optind + 2];
+    }
+    else if (remaining_arg_count < 2)
+    {
+      std::cerr << "Too few arguments\n";
+      return false;
+    }
+    else
+    {
+      std::cerr << "Too many arguments\n";
+      return false;
     }
 
     return true;
@@ -60,7 +212,7 @@ public:
 };
 
 
-bool parse_covariates_file(const assoc_prog_args& args, const std::vector<std::string>& ids, xt::xtensor<scalar_type, 2>& dest)
+bool parse_covariates_file(const qtl_prog_args& args, const std::vector<std::string>& ids, xt::xtensor<scalar_type, 2>& dest)
 {
   std::unordered_map<std::string, std::size_t> id_map;
   id_map.reserve(ids.size());
@@ -68,9 +220,9 @@ bool parse_covariates_file(const assoc_prog_args& args, const std::vector<std::s
     id_map[ids[i]] = i;
   std::size_t match_count = 0, line_count = 0;
 
-  if (args.cov_columns().empty())
+  if (args.cov_path().empty())
     return std::cerr << "Error: must pass separate covariates file\n", false;
-  std::string path = args.cov_columns()[0];
+  std::string path = args.cov_path();
   std::ifstream cov_file(path, std::ios::binary);
 
   std::string line;
@@ -114,7 +266,7 @@ bool parse_covariates_file(const assoc_prog_args& args, const std::vector<std::s
   return true;
 }
 
-bool parse_phenotypes_file(const assoc_prog_args& args, savvy::reader& geno_file, std::vector<std::string>& sample_intersection, std::vector<std::vector<scalar_type>>& dest, std::vector<std::string>& pheno_names)
+bool parse_phenotypes_file(const qtl_prog_args& args, savvy::reader& geno_file, std::vector<std::string>& sample_intersection, std::vector<std::vector<scalar_type>>& dest, std::vector<std::string>& pheno_names)
 {
   std::ifstream pheno_file(args.pheno_path(), std::ios::binary);
   if (!pheno_file)
@@ -376,12 +528,14 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
     s_yy[i] = std::inner_product(pheno_resids[i].begin(),  pheno_resids[i].end(), pheno_resids[i].begin(), scalar_type());
   }
 
+  const std::vector<std::string> pass{"PASS"};
   savvy::compressed_vector<std::int8_t> geno;
   savvy::compressed_vector<scalar_type> geno_sub;
   std::vector<scalar_type> geno_sub_dense;
   savvy::variant var; std::size_t progress = 0;
   while (geno_file.read(var))
   {
+    if (args.pass_only() && var.filters() != pass) continue;
     var.get_format("GT", geno);
     for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
     {
@@ -617,7 +771,60 @@ void mean_center(std::vector<T>& vec)
     *it = *it - m;
 }
 
-bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, const std::vector<std::string>& pheno_names,  std::vector<residualizer>& residualizers, std::vector<std::vector<std::size_t>> subset_non_missing_map, savvy::reader& geno_file, std::ostream& output_file, const qtl_prog_args& args)
+class output_wrapper
+{
+private:
+  std::vector<std::unique_ptr<shrinkwrap::bgzf::ostream>> out_files;
+  std::vector<std::string> pheno_names_;
+  bool split_;
+public:
+  output_wrapper(const std::string& output_path, std::vector<std::string> pheno_names, bool split_output) :
+    pheno_names_(std::move(pheno_names)),
+    split_(split_output)
+  {
+    if (split_)
+    {
+      out_files.resize(pheno_names_.size());
+      for (std::size_t i = 0; i < out_files.size(); ++i)
+        out_files[i] = std::make_unique<shrinkwrap::bgzf::ostream>(output_path + pheno_names_[i] + ".tsv.gz");
+    }
+    else
+    {
+      out_files.emplace_back(std::make_unique<shrinkwrap::bgzf::ostream>(output_path));
+    }
+
+    for (std::size_t i = 0; i < out_files.size(); ++i)
+    {
+      *out_files[i] << "chrom\tpos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names();
+      if(!split_)
+        *out_files[i] << "\tpheno_id";
+      *out_files[i] << std::endl;
+    }
+  }
+
+  bool write(const savvy::site_info& var, float maf, std::int64_t mac, std::int64_t ns, const linear_model::stats_t& stats, std::size_t pheno_idx)
+  {
+    std::size_t file_idx = 0;
+    if (split_)
+      file_idx = pheno_idx;
+    (*out_files[file_idx]) << var.chromosome()
+       << "\t" << var.position()
+       << "\t" << var.ref()
+       << "\t" << (var.alts().empty() ? "." : var.alts()[0])
+       << "\t" << var.id()
+       << "\t" << maf
+       << "\t" << mac
+       << "\t" << ns
+       << "\t" << stats;
+    if (!split_)
+      (*out_files[file_idx]) << "\t" << pheno_names_[pheno_idx];
+    (*out_files[file_idx]) << "\n";
+
+    return out_files[file_idx]->good();
+  }
+};
+
+bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, const std::vector<std::string>& pheno_names,  std::vector<residualizer>& residualizers, std::vector<std::vector<std::size_t>> subset_non_missing_map, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
 {
   if (phenos.empty())
     return false;
@@ -715,16 +922,18 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
         }
 #endif
         if (stats.pvalue > args.max_pval()) continue;
-        output_file << var.chromosome()
-                    << "\t" << var.position()
-                    << "\t" << var.ref()
-                    << "\t" << (var.alts().empty() ? "." : var.alts()[0])
-                    << "\t" << var.id()
-                    << "\t" << maf
-                    << "\t" << mac
-                    << "\t" << geno_sub.size()
-                    << "\t" << stats
-                    << "\t" << pheno_names[pheno_idx] << "\n";
+        if (!output_file.write(var, maf, mac, geno_sub.size(), stats, pheno_idx))
+          return std::cerr << "Error: failed writing to output file\n", false;
+//        output_file << var.chromosome()
+//                    << "\t" << var.position()
+//                    << "\t" << var.ref()
+//                    << "\t" << (var.alts().empty() ? "." : var.alts()[0])
+//                    << "\t" << var.id()
+//                    << "\t" << maf
+//                    << "\t" << mac
+//                    << "\t" << geno_sub.size()
+//                    << "\t" << stats
+//                    << "\t" << pheno_names[pheno_idx] << "\n";
 
         // geno_sub
         // geno_resid =
@@ -797,6 +1006,11 @@ int trans_qtl_main(int argc, char** argv)
     debug_log.open(args.debug_log_path());
 
   savvy::reader geno_file(args.geno_path());
+  if (!geno_file)
+    return std::cerr << "Could not open geno file\n", EXIT_FAILURE;
+
+  if (args.region() && !geno_file.reset_bounds(*args.region()))
+    return std::cerr << "Could not open genomic region\n", EXIT_FAILURE;
 
   std::vector<std::string> sample_intersection;
   std::vector<std::string> pheno_names;
@@ -811,8 +1025,9 @@ int trans_qtl_main(int argc, char** argv)
   //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
   //cov_mat = cov_mat - xt::mean(cov_mat, {0});
 
-  shrinkwrap::bgzf::ostream output_file(args.output_path());
-  output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
+  //shrinkwrap::bgzf::ostream output_file(args.output_path());
+  //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
+  output_wrapper output(args.output_path(), pheno_names, args.split_output());
 
 
   std::vector<std::vector<std::size_t>> subset_non_missing_map(phenos.size(), std::vector<std::size_t>(phenos.front().size()));
@@ -842,7 +1057,7 @@ int trans_qtl_main(int argc, char** argv)
       residualizers.resize(1);
   }
 
-  if (!process_trans_batch(phenos, pheno_names, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output_file, args))
+  if (!process_trans_batch(phenos, pheno_names, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output, args))
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
 
 
