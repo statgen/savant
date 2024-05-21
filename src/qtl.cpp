@@ -393,6 +393,33 @@ public:
     return std::vector<scalar_type> (residuals.begin(), residuals.end());
   }
 
+  template <typename T>
+  std::vector<scalar_type> operator()(const savvy::compressed_vector<T>& v, bool invnorm = false) const // TODO: this method needs to be tested.
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    if (v.size() != m_.shape()[1]) throw std::runtime_error("length mismatch");
+
+    xt::xtensor<scalar_type, 1> pbetas = xt::zeros<scalar_type>({m_.shape()[0]});
+    for (auto it = v.begin(); it != v.end(); ++it)
+    {
+      for (std::size_t j = 0; j < pbetas.size(); ++j)
+        pbetas[j] += (*it) * m_(j, it.offset()); // TODO: consider making m_ column-major
+    }
+
+    xt::xtensor<scalar_type, 1> pred = dot(x_, pbetas);
+    std::vector<scalar_type> residuals(v.size());
+    for (auto it = v.begin(); it != v.end(); ++it)
+      residuals[it.offset()] = *it;
+
+    for (std::size_t i = 0; i < pred.size(); ++i)
+      residuals[i] -= pred[i];
+
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
 };
 
 class residualizer_inv
