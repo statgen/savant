@@ -1025,6 +1025,11 @@ int trans_qtl_main(int argc, char** argv)
   //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
   //cov_mat = cov_mat - xt::mean(cov_mat, {0});
 
+  for (auto it = pheno_names.begin(); args.split_output() && it != pheno_names.end(); ++it)
+  {
+    if (it->find('/') != std::string::npos)
+      return std::cerr << "Error: forward slash encountered in phenotype column name which is not supported when using --split-output\n", false;
+  }
   //shrinkwrap::bgzf::ostream output_file(args.output_path());
   //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
   output_wrapper output(args.output_path(), pheno_names, args.split_output());
