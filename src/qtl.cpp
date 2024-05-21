@@ -18,13 +18,45 @@ class qtl_prog_args : public assoc_prog_args
 {
 private:
   std::int64_t window_size_ = 48; //1000000;
+  double max_pval_ = 2.;
 public:
-  qtl_prog_args() : assoc_prog_args("qtl", {})
+  qtl_prog_args() :
+    assoc_prog_args("qtl", {
+      {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"}
+    })
   {
+
 
   }
 
   std::int64_t window_size() const { return window_size_; }
+  double max_pval() const { return max_pval_; }
+
+  bool parse(int argc, char** argv)
+  {
+    if (!assoc_prog_args::parse(argc, argv))
+      return false;
+
+    optind = 1; // reset getopt for second loop
+    int long_index = 0;
+    int opt = 0;
+    while ((opt = getopt_long(argc, argv, short_opt_string_.c_str(), long_options_.data(), &long_index)) != -1)
+    {
+      char copt = char(opt & 0xFF);
+      switch (copt)
+      {
+      case '\x02':
+        if (std::string("max-pvalue") == long_options_[long_index].name)
+        {
+          max_pval_ = std::atof(optarg ? optarg : "");
+        }
+      case '?':
+        return false;
+      }
+    }
+
+    return true;
+  }
 };
 
 
@@ -605,14 +637,9 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
   savvy::variant var; std::size_t progress = 0;
   while (geno_file.read(var))
   {
-    if (var.pos() == 19260832)
-    {
-      auto a = 0;
-    }
     var.get_format("GT", geno);
     for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
     {
-      //std::int64_t var_end = std::max<std::int64_t>(var.pos(), var.pos() + var.alts()[alt_idx-1].size() - 1);
       for (std::size_t pheno_idx = 0; pheno_idx < pheno_resids.size(); ++pheno_idx)
       {
         std::int64_t an = geno.size();
@@ -687,6 +714,7 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
           auto a = 0;
         }
 #endif
+        if (stats.pvalue > args.max_pval()) continue;
         output_file << var.chromosome()
                     << "\t" << var.position()
                     << "\t" << var.ref()
@@ -694,7 +722,7 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
                     << "\t" << var.id()
                     << "\t" << maf
                     << "\t" << mac
-                    << "\t" << an/ploidy
+                    << "\t" << geno_sub.size()
                     << "\t" << stats
                     << "\t" << pheno_names[pheno_idx] << "\n";
 
