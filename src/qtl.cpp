@@ -31,6 +31,7 @@ private:
   double min_mac_ = 1.0;
   double min_maf_ = 0.f;
   double max_pval_ = 2.;
+  double resid_geno_threshold_ = 0.;
   bool split_output_ = false;
   bool help_ = false;
   bool invnorm_ = false;
@@ -47,6 +48,7 @@ public:
       {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
+      {"resid-geno-threshold", "<real>", '\x02', "P-value threshold at which associations are retested with residualized genotypes (default: 0 a.k.a. never)"},
       {"pass-only", "", '\x01', "Only test PASS variants"},
       {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"},
       {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"}})
@@ -80,6 +82,7 @@ public:
   double min_mac() const { return min_mac_; }
   double min_maf() const { return min_maf_; }
   double max_pval() const { return max_pval_; }
+  double resid_geno_threshold() const { return resid_geno_threshold_; }
   std::int64_t window_size() const { return 48; } // TODO: remove
   bool split_output() const { return split_output_; }
   bool help_is_set() const { return help_; }
@@ -162,6 +165,10 @@ public:
         else if (std::string("max-pvalue") == long_options_[long_index].name)
         {
           max_pval_ = std::atof(optarg ? optarg : "");
+        }
+        else if (std::string("resid-geno-threshold") == long_options_[long_index].name)
+        {
+          resid_geno_threshold_ = std::atof(optarg ? optarg : "");
         }
         else
         {
@@ -927,6 +934,11 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
         //          }
 
         linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+        if (stats.pvalue < args.resid_geno_threshold())
+        {
+          geno_sub_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
+          stats = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), linear_model::variable_stats<scalar_type>(geno_sub_dense), pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+        }
 #if 0
         if (stats.pvalue < 1e-8)
         {
