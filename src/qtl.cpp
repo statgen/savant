@@ -13,6 +13,7 @@
 #include "linear_model.hpp"
 
 #include <cstdlib>
+#include <random>
 
 class qtl_prog_args : public getopt_wrapper
 {
@@ -31,7 +32,7 @@ private:
   double min_mac_ = 1.0;
   double min_maf_ = 0.f;
   double max_pval_ = 2.;
-  double resid_geno_threshold_ = 0.;
+  double resid_geno_threshold_ = -1.;
   bool split_output_ = false;
   bool help_ = false;
   bool invnorm_ = false;
@@ -48,7 +49,7 @@ public:
       {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
-      {"resid-geno-threshold", "<real>", '\x02', "P-value threshold at which associations are retested with residualized genotypes (default: 0 a.k.a. never)"},
+      {"resid-geno-threshold", "<real>", '\x02', "P-value threshold at which associations are retested with residualized genotypes (default: never)"},
       {"pass-only", "", '\x01', "Only test PASS variants"},
       {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"},
       {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"}})
@@ -862,12 +863,35 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
 {
   if (phenos.empty())
     return false;
-
+#if 0 // PERMUTATION
+  std::vector<std::size_t> random_map(subset_non_missing_map.front().size());
+  std::iota(random_map.begin(), random_map.end(), 0);
+  std::default_random_engine prng{7};
+  std::shuffle(random_map.begin(), random_map.end(), prng);
+  std::vector<scalar_type> tmp_resid;
+#endif
   std::vector<linear_model::variable_stats<scalar_type>> pheno_stats(phenos.size());
   std::vector<std::vector<scalar_type>> pheno_resids(phenos.size());
   for (std::size_t i = 0; i < phenos.size(); ++i)
   {
     pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i], args.invnorm());
+#if 0 // PERMUTATION
+    assert(i < pheno_resids.size());
+    assert(i < subset_non_missing_map.size());
+    tmp_resid.clear();
+    tmp_resid.reserve(pheno_resids[i].size());
+    std::vector<std::size_t> shuffled_subset_non_missing_map(subset_non_missing_map[i].size());
+    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
+      shuffled_subset_non_missing_map[random_map[j]] = subset_non_missing_map[i][j];
+
+    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
+    {
+      std::size_t src_idx = shuffled_subset_non_missing_map[j];
+      if (src_idx < pheno_resids[i].size())
+        tmp_resid.push_back(pheno_resids[i][src_idx]);
+    }
+    pheno_resids[i] = tmp_resid;
+#endif
     // TODO: center residuals
     pheno_stats[i] = linear_model::variable_stats<scalar_type>(pheno_resids[i]);
   }
@@ -933,8 +957,10 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
         //            element = (element / stdev) * stdev_before;
         //          }
 
-        linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
-        if (stats.pvalue < args.resid_geno_threshold())
+        linear_model::stats_t stats{};
+        if (args.resid_geno_threshold() < 1.)
+          stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+        if (args.resid_geno_threshold() >= 1. || stats.pvalue <= args.resid_geno_threshold())
         {
           geno_sub_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
           stats = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), linear_model::variable_stats<scalar_type>(geno_sub_dense), pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
