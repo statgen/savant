@@ -37,6 +37,7 @@ private:
   bool help_ = false;
   bool invnorm_ = false;
   bool pass_only_ = false;
+  bool print_model_fit_ = false;
 public:
   qtl_prog_args() :
     getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
@@ -49,10 +50,11 @@ public:
       {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"region", "<string>", 'r', "Genomic region to test (chrom:beg-end)"},
-      {"resid-geno-threshold", "<real>", '\x02', "P-value threshold at which associations are retested with residualized genotypes (default: never)"},
+      {"resid-geno-threshold", "<real>", '\x02', "Associations with p-values <= this threshold are retested with residualized genotypes (default: -1 a.k.a never)"},
       {"pass-only", "", '\x01', "Only test PASS variants"},
       {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"},
-      {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"}})
+      {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"},
+      {"print-model-fit", "", '\x01', "Produces file with statistics for regressing the phenotype on covariates"}})
   {
     //    long_options_.reserve(long_options_.size() + additional_options.size());
     //    long_options_.insert(--long_options_.end(), additional_options.begin(), additional_options.end());
@@ -86,6 +88,7 @@ public:
   double resid_geno_threshold() const { return resid_geno_threshold_; }
   std::int64_t window_size() const { return 48; } // TODO: remove
   bool split_output() const { return split_output_; }
+  bool print_model_fit() const { return print_model_fit_; }
   bool help_is_set() const { return help_; }
   bool invnorm() const { return invnorm_; }
   bool pass_only() const { return pass_only_; }
@@ -138,6 +141,10 @@ public:
         else if (std::string("split-output") == long_options_[long_index].name)
         {
           split_output_ = true;
+        }
+        else if (std::string("print-model-fit") == long_options_[long_index].name)
+        {
+          print_model_fit_ = true;
         }
         else
         {
@@ -220,7 +227,7 @@ public:
 };
 
 
-bool parse_covariates_file(const qtl_prog_args& args, const std::vector<std::string>& ids, xt::xtensor<scalar_type, 2>& dest)
+bool parse_covariates_file(const qtl_prog_args& args, const std::vector<std::string>& ids, xt::xtensor<scalar_type, 2>& dest, std::vector<std::string>& predictor_names)
 {
   std::unordered_map<std::string, std::size_t> id_map;
   id_map.reserve(ids.size());
@@ -240,6 +247,7 @@ bool parse_covariates_file(const qtl_prog_args& args, const std::vector<std::str
   auto str_fields = utility::split_string_to_vector(line.c_str(), '\t');
   if (str_fields.empty())
     return std::cerr << "Error: first line in covariates file is empty\n", false;
+  predictor_names.assign(str_fields.begin() + 1, str_fields.end());
 
   dest = xt::xtensor<scalar_type, 2>::from_shape({ids.size(), str_fields.size()});
 
@@ -371,8 +379,31 @@ public:
     m_ = xt::eval(dot(pinv(dot(transpose(x_), x_)), transpose(x_)));
   }
 
-  std::size_t n_variables() const { return x_.shape()[1]; }
+  std::size_t n_predictors() const { return x_.shape()[1] - 1; } // excludes intercept term.
   std::size_t n_samples() const { return x_.shape()[0]; }
+
+  template <typename T>
+  void print_model_fit(std::ostream& ofs, const std::vector<T>& v_std) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto v = xt::adapt(v_std, {v_std.size()});
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+
+    double sse = xt::eval(xt::sum(residuals * residuals))();
+    double sst = xt::eval(xt::sum(xt::square(v - xt::mean(v))))();
+    double r2 = 1. - sse / sst;
+    std::size_t n = v.size();
+    std::size_t k = n_predictors();
+    double r2_adj = 1. - (sse / (n - k - 1.)) / (sst / (n - 1.));
+
+    ofs << r2 << "\t" << r2_adj;
+    for (auto it = pbetas.begin(); it != pbetas.end(); ++it)
+      ofs << "\t" << *it;
+    ofs << "\n";
+  }
 
   template <typename T>
   res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
@@ -627,7 +658,7 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
 //            element = (element / stdev) * stdev_before;
 //          }
 
-          linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), std::accumulate(geno_sub.begin(), geno_sub.end(), scalar_type()), s_y[pheno_idx], s_yy[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+          linear_model::stats_t stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), std::accumulate(geno_sub.begin(), geno_sub.end(), scalar_type()), s_y[pheno_idx], s_yy[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
 #if 0
           geno_sub_dense.clear();
           geno_sub_dense.resize(geno_sub.size());
@@ -712,8 +743,9 @@ int cis_qtl_main(int argc, char** argv)
   }
   // ^^^ Create sample mapping
 
+  std::vector<std::string> cov_names;
   xt::xtensor<scalar_type, 2> cov_mat;
-  if (!parse_covariates_file(args, sample_intersection, cov_mat))
+  if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
   //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
@@ -959,11 +991,11 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
 
         linear_model::stats_t stats{};
         if (args.resid_geno_threshold() < 1.)
-          stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+          stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
         if (args.resid_geno_threshold() >= 1. || stats.pvalue <= args.resid_geno_threshold())
         {
           geno_sub_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
-          stats = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), linear_model::variable_stats<scalar_type>(geno_sub_dense), pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
+          stats = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), linear_model::variable_stats<scalar_type>(geno_sub_dense), pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
         }
 #if 0
         if (stats.pvalue < 1e-8)
@@ -1083,8 +1115,9 @@ int trans_qtl_main(int argc, char** argv)
   if (!parse_phenotypes_file(args, geno_file, sample_intersection, phenos, pheno_names))
     return std::cerr << "Error: failed parsing phenotypes file\n", EXIT_FAILURE;
 
+  std::vector<std::string> cov_names;
   xt::xtensor<scalar_type, 2> cov_mat;
-  if (!parse_covariates_file(args, sample_intersection, cov_mat))
+  if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
   //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
@@ -1095,10 +1128,6 @@ int trans_qtl_main(int argc, char** argv)
     if (it->find('/') != std::string::npos)
       return std::cerr << "Error: forward slash encountered in phenotype column name which is not supported when using --split-output\n", false;
   }
-  //shrinkwrap::bgzf::ostream output_file(args.output_path());
-  //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
-  output_wrapper output(args.output_path(), pheno_names, args.split_output());
-
 
   std::vector<std::vector<std::size_t>> subset_non_missing_map(phenos.size(), std::vector<std::size_t>(phenos.front().size()));
   std::vector<std::size_t> keep_samples(sample_intersection.size()); // reserve max number of samples
@@ -1126,6 +1155,32 @@ int trans_qtl_main(int argc, char** argv)
     if (i + 1 == residualizers.size())
       residualizers.resize(1);
   }
+
+
+
+  if (args.print_model_fit())
+  {
+    std::ofstream ofs(args.output_path());
+    //xt::xtensor<scalar_type, 2> m = xt::eval(xt::linalg::dot(xt::linalg::pinv(xt::linalg::dot(xt::transpose(cov_mat), cov_mat)), transpose(cov_mat)));
+    ofs << "pheno_id\tr2\tadjusted_r2\tintercept";
+    for (auto it = cov_names.begin(); it != cov_names.end(); ++it)
+      ofs << "\t" << *it;
+    ofs << std::endl;
+
+    for (std::size_t i = 0; ofs.good() && i < phenos.size(); ++i)
+    {
+      ofs << pheno_names[i] << "\t";
+      residualizers[i < residualizers.size() ? i : 0].print_model_fit(ofs, phenos[i]);
+    }
+
+    if (ofs.good())
+      return EXIT_SUCCESS;
+    return EXIT_FAILURE;
+  }
+
+  //shrinkwrap::bgzf::ostream output_file(args.output_path());
+  //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
+  output_wrapper output(args.output_path(), pheno_names, args.split_output());
 
   if (!process_trans_batch(phenos, pheno_names, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output, args))
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
