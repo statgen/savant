@@ -1120,7 +1120,7 @@ int trans_qtl_main(int argc, char** argv)
   if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
-  if (false)
+  if (args.print_model_fit() && false)
   {
     // scale covariates
     auto sd = xt::eval(xt::stddev(cov_mat, {0}));
