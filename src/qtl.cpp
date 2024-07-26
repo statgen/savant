@@ -1120,6 +1120,15 @@ int trans_qtl_main(int argc, char** argv)
   if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
+  if (false)
+  {
+    // scale covariates
+    auto sd = xt::eval(xt::stddev(cov_mat, {0}));
+    sd(0) = 1.;
+    auto mu = xt::eval(xt::mean(cov_mat, {0}));
+    mu(0) = 0.;
+    cov_mat = (cov_mat - mu) / sd;
+  }
   //cov_mat = (cov_mat - xt::mean(cov_mat, {0})) / xt::stddev(cov_mat, {0});
   //cov_mat = cov_mat - xt::mean(cov_mat, {0});
 
