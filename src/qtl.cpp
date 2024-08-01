@@ -376,7 +376,18 @@ public:
     std::cerr << c << std::endl;
     std::cerr << xt::sum(x_orig) << std::endl;
     m_ = xt::eval(dot(pinv(c), transpose(x_)));*/
-    m_ = xt::eval(dot(pinv(dot(transpose(x_), x_)), transpose(x_)));
+    cov_t c = dot(transpose(x_), x_);
+    cov_t c_i;
+    try
+    {
+      c_i = inv(c);
+    }
+    catch (...)
+    {
+      c_i = pinv(c);
+    }
+
+    m_ = xt::eval(dot(c_i, transpose(x_)));
   }
 
   std::size_t n_predictors() const { return x_.shape()[1] - 1; } // excludes intercept term.
@@ -392,8 +403,10 @@ public:
     auto pbetas = dot(m_, v);
     res_t residuals = v - dot(x_, pbetas);
 
-    double sse = xt::eval(xt::sum(residuals * residuals))();
-    double sst = xt::eval(xt::sum(xt::square(v - xt::mean(v))))();
+//    double sse = xt::eval(xt::sum(residuals * residuals))();
+//    double sst = xt::eval(xt::sum(xt::square(v - xt::mean(v))))();
+    double sse = xt::eval(xt::linalg::dot(residuals, residuals))();
+    double sst = xt::eval(xt::variance(v))() * v.size();
     double r2 = 1. - sse / sst;
     std::size_t n = v.size();
     std::size_t k = n_predictors();
@@ -891,11 +904,100 @@ public:
   }
 };
 
-bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, const std::vector<std::string>& pheno_names,  std::vector<residualizer>& residualizers, std::vector<std::vector<std::size_t>> subset_non_missing_map, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
+template <typename GenoT>
+bool process_variant(const savvy::site_info& var, const std::vector<std::vector<scalar_type>>& pheno_resids, const std::vector<linear_model::variable_stats<scalar_type>>& pheno_stats,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, const savvy::compressed_vector<GenoT>& geno, std::vector<scalar_type>& geno_dense, const linear_model::variable_stats<scalar_type>& geno_stats, output_wrapper& output_file, const qtl_prog_args& args, std::size_t ploidy)
+{
+  for (std::size_t pheno_idx = 0; pheno_idx < pheno_resids.size(); ++pheno_idx)
+  {
+    const std::vector<scalar_type>& pheno_ref = pheno_resids[pheno_idx];
+    const std::vector<std::size_t>& pheno_map_ref = subset_non_missing_map[pheno_idx];
+
+    std::size_t n = pheno_resids[pheno_idx].size();
+
+    scalar_type s_x = geno_stats.sum();
+    scalar_type s_xx = geno_stats.sum_squared();
+    for (auto it = geno.begin(); it != geno.end(); ++it)
+    {
+      if (pheno_map_ref[it.offset()] >= n)
+      {
+        s_x -= *it;
+        s_xx -= (*it) * (*it);
+      }
+    }
+
+    linear_model::variable_stats<scalar_type> geno_stats_sub(s_x, s_xx);
+
+    double ac = geno_stats_sub.sum();
+    std::size_t an = n * ploidy;
+    double af = ac / an;
+    double mac = (ac > (an/2.f) ? an - ac : ac);
+    double maf = (af > 0.5f ? 1.f - af : af);
+
+    if (an == 0) return true;
+    if (mac < args.min_mac()) return true;
+    if (maf < args.min_maf()) return true;
+
+    //savvy::stride_reduce(geno_sub, ploidy, savvy::plus_eov<scalar_type>());
+
+
+
+    scalar_type s_xy = 0;
+    for (auto it = geno.begin(); it != geno.end(); ++it)
+    {
+      std::size_t off = pheno_map_ref[it.offset()];
+      if (off < n)
+      {
+        s_xy += (*it) * pheno_ref[off];
+      }
+    }
+
+
+    //          double mean = std::accumulate(geno_sub.begin(), geno_sub.end(), 0.) / geno_sub.size();
+    //          double stdev = std::sqrt(std::max(0., std::inner_product(geno_sub.begin(), geno_sub.end(), geno_sub.begin(), 0.0) / geno_sub.size() - mean*mean));
+    //          double stdev2 = 0.;
+    //          for (auto it = geno_sub.begin(); it != geno_sub.end(); ++it)
+    //            stdev2 += (mean - *it) * (mean - *it);
+    //          stdev2 = std::sqrt(stdev2 / geno_sub.size());
+    //
+    //          for(auto& element : geno_sub)
+    //          {
+    //            element = (element - mean);
+    //            element = (element / stdev) * stdev_before;
+    //          }
+
+    linear_model::stats_t stats{};
+    if (args.resid_geno_threshold() < 1.)
+    {
+      stats = linear_model::ols(n, s_xy, geno_stats_sub, pheno_stats[pheno_idx], n - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
+    }
+    if (args.resid_geno_threshold() >= 1. || stats.pvalue <= args.resid_geno_threshold())
+    {
+      geno_dense.clear();
+      geno_dense.resize(n);
+      for (auto it = geno.begin(); it != geno.end(); ++it)
+      {
+        std::size_t off = pheno_map_ref[it.offset()];
+        if (off < n)
+          geno_dense[off] = *it;
+      }
+
+      geno_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_dense);
+      stats = linear_model::ols(geno_dense, pheno_resids[pheno_idx], linear_model::variable_stats<scalar_type>(geno_dense), pheno_stats[pheno_idx], geno_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
+    }
+
+    if (stats.pvalue > args.max_pval()) continue;
+    if (!output_file.write(var, maf, mac, n, stats, pheno_idx))
+      return std::cerr << "Error: failed writing to output file\n", false;
+  }
+  return true;
+}
+
+bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
 {
   if (phenos.empty())
     return false;
 #if 0 // PERMUTATION
+  std::size_t n_perm = 1;
   std::vector<std::size_t> random_map(subset_non_missing_map.front().size());
   std::iota(random_map.begin(), random_map.end(), 0);
   std::default_random_engine prng{7};
@@ -908,135 +1010,75 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos, co
   {
     pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i], args.invnorm());
 #if 0 // PERMUTATION
-    assert(i < pheno_resids.size());
-    assert(i < subset_non_missing_map.size());
-    tmp_resid.clear();
-    tmp_resid.reserve(pheno_resids[i].size());
-    std::vector<std::size_t> shuffled_subset_non_missing_map(subset_non_missing_map[i].size());
-    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
-      shuffled_subset_non_missing_map[random_map[j]] = subset_non_missing_map[i][j];
-
-    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
+    std::size_t dest_idx = 0;
+    pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i], args.invnorm());
+    for (std::size_t j = 0; j < subset_non_missing_map[i].size(); ++j)
     {
-      std::size_t src_idx = shuffled_subset_non_missing_map[j];
-      if (src_idx < pheno_resids[i].size())
-        tmp_resid.push_back(pheno_resids[i][src_idx]);
+      if (subset_non_missing_map[i][random_map[j]] < pheno_resids[i].size())
+        tmp_resid[dest_idx++] = pheno_resids[i][subset_non_missing_map[i][random_map[j]]];
     }
-    pheno_resids[i] = tmp_resid;
-#endif
-    // TODO: center residuals
+    assert(dest_idx == pheno_resids.size());
+    std::swap(pheno_resids[i], tmp_resid);
+    pheno_stats[i] = linear_model::variable_stats<scalar_type>::gen_strided_stats(pheno_resids[i], 1 + n_perm);
+
+//    assert(i < pheno_resids.size());
+//    assert(i < subset_non_missing_map.size());
+//    tmp_resid.clear();
+//    tmp_resid.reserve(pheno_resids[i].size());
+//    std::vector<std::size_t> shuffled_subset_non_missing_map(subset_non_missing_map[i].size());
+//    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
+//      shuffled_subset_non_missing_map[random_map[j]] = subset_non_missing_map[i][j];
+//
+//    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
+//    {
+//      std::size_t src_idx = shuffled_subset_non_missing_map[j];
+//      if (src_idx < pheno_resids[i].size())
+//        tmp_resid.push_back(pheno_resids[i][src_idx]);
+//    }
+//    pheno_resids[i] = tmp_resid;
+#else
     pheno_stats[i] = linear_model::variable_stats<scalar_type>(pheno_resids[i]);
+#endif
   }
 
   savvy::compressed_vector<std::int8_t> geno;
-  savvy::compressed_vector<scalar_type> geno_sub;
-  std::vector<scalar_type> geno_sub_dense;
+  savvy::compressed_vector<std::int8_t> geno_sub;
+  savvy::compressed_vector<std::int8_t> geno_biallele;
+  std::vector<scalar_type> geno_dense;
   savvy::variant var; std::size_t progress = 0;
   while (geno_file.read(var))
   {
     var.get_format("GT", geno);
-    for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
+
+    std::int64_t an = geno.size();
+    assert(!subset_non_missing_map.empty());
+    std::size_t ploidy = an / subset_non_missing_map[0].size();
+
+    if (var.alts().size() > 1)
     {
-      for (std::size_t pheno_idx = 0; pheno_idx < pheno_resids.size(); ++pheno_idx)
+      geno_biallele.resize(0);
+      geno_biallele.resize(geno.size());
+      for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
       {
-        std::int64_t an = geno.size();
-        std::size_t ploidy = an / subset_non_missing_map[pheno_idx].size();
-        float ac = 0.f;
-        geno_sub.resize(0);
-        geno_sub.resize(phenos[pheno_idx].size() * ploidy);
         for (auto it = geno.begin(); it != geno.end(); ++it)
         {
-          std::size_t sub_offset = subset_non_missing_map[pheno_idx][it.offset()/ploidy] * ploidy + (it.offset() % ploidy);
-          if (sub_offset < geno_sub.size())
-          {
-            if (*it == alt_idx)
-            {
-              geno_sub[sub_offset] = 1;
-              ac += 1.f;
-            }
-          }
-          else
-          {
-            --an;
-          }
+          if (*it == alt_idx)
+            geno_biallele[it.offset()] = 1;
+          else if (savvy::typed_value::is_end_of_vector(*it))
+            geno_biallele[it.offset()] = *it;
         }
-
-        float af = ac / an;
-        float mac = (ac > (an/2.f) ? an - ac : ac);
-        float maf = (af > 0.5f ? 1.f - af : af);
-
-        if (an == 0) continue;
-        if (mac < args.min_mac()) continue;
-        if (maf < args.min_maf()) continue;
-
-        savvy::stride_reduce(geno_sub, ploidy, savvy::plus_eov<scalar_type>());
-
-        linear_model::variable_stats<scalar_type> geno_stats(geno_sub);
-
-        // TODO: implement sparse residualize
-        // geno_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
-
-        //          double mean = std::accumulate(geno_sub.begin(), geno_sub.end(), 0.) / geno_sub.size();
-        //          double stdev = std::sqrt(std::max(0., std::inner_product(geno_sub.begin(), geno_sub.end(), geno_sub.begin(), 0.0) / geno_sub.size() - mean*mean));
-        //          double stdev2 = 0.;
-        //          for (auto it = geno_sub.begin(); it != geno_sub.end(); ++it)
-        //            stdev2 += (mean - *it) * (mean - *it);
-        //          stdev2 = std::sqrt(stdev2 / geno_sub.size());
-        //
-        //          for(auto& element : geno_sub)
-        //          {
-        //            element = (element - mean);
-        //            element = (element / stdev) * stdev_before;
-        //          }
-
-        linear_model::stats_t stats{};
-        if (args.resid_geno_threshold() < 1.)
-          stats = linear_model::ols(geno_sub, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats, pheno_stats[pheno_idx], geno_sub.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
-        if (args.resid_geno_threshold() >= 1. || stats.pvalue <= args.resid_geno_threshold())
-        {
-          geno_sub_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_sub);
-          stats = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), linear_model::variable_stats<scalar_type>(geno_sub_dense), pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
-        }
-#if 0
-        if (stats.pvalue < 1e-8)
-        {
-          geno_sub_dense.clear();
-          geno_sub_dense.resize(geno_sub.size());
-          for (auto it = geno_sub.begin(); it != geno_sub.end(); ++it)
-            geno_sub_dense[it.offset()] = *it;
-
-          //        scalar_type s_x_dense = std::accumulate(geno_sub_dense.begin(), geno_sub_dense.end(), scalar_type());
-          //        scalar_type mean = s_x_dense / geno_sub_dense.size();
-          //        for(auto& element : geno_sub_dense)
-          //        {
-          //          element = (element - mean);
-          //        }
-
-          mean_center(geno_sub_dense);
-          linear_model::variable_stats<scalar_type> geno_stats_dense(geno_sub_dense);
-          linear_model::stats_t stats_dense = linear_model::ols(geno_sub_dense, xt::adapt(pheno_resids[pheno_idx], {pheno_resids[pheno_idx].size()}), geno_stats_dense, pheno_stats[pheno_idx], geno_sub_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_variables() + 2));
-          auto a = 0;
-        }
-#endif
-        if (stats.pvalue > args.max_pval()) continue;
-        if (!output_file.write(var, maf, mac, geno_sub.size(), stats, pheno_idx))
-          return std::cerr << "Error: failed writing to output file\n", false;
-//        output_file << var.chromosome()
-//                    << "\t" << var.position()
-//                    << "\t" << var.ref()
-//                    << "\t" << (var.alts().empty() ? "." : var.alts()[0])
-//                    << "\t" << var.id()
-//                    << "\t" << maf
-//                    << "\t" << mac
-//                    << "\t" << geno_sub.size()
-//                    << "\t" << stats
-//                    << "\t" << pheno_names[pheno_idx] << "\n";
-
-        // geno_sub
-        // geno_resid =
-        // pheno_it ~ geno_resid
-        // results[pheno_idx].emplace_back(var_id, beta, beta_se, pval, dof, n_samples)
+        savvy::stride_reduce(geno_biallele, ploidy, savvy::plus_eov<scalar_type>());
+        linear_model::variable_stats<scalar_type> geno_stats(geno_biallele);
+        if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno_biallele, geno_dense, geno_stats, output_file, args, ploidy))
+          return false;
       }
+    }
+    else
+    {
+      savvy::stride_reduce(geno, ploidy, savvy::plus_eov<scalar_type>());
+      linear_model::variable_stats<scalar_type> geno_stats(geno);
+      if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno, geno_dense, geno_stats, output_file, args, ploidy))
+        return false;
     }
   }
 
@@ -1117,8 +1159,15 @@ int trans_qtl_main(int argc, char** argv)
 
   std::vector<std::string> cov_names;
   xt::xtensor<scalar_type, 2> cov_mat;
-  if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
+  if (args.cov_path().empty())
+    cov_mat = xt::ones<scalar_type, std::vector<std::size_t>>({sample_intersection.size(), 1}); //TODO: test
+  else if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
+
+  std::vector<std::vector<std::string>> permute_id_matrix;
+  if (!args.perm_path().empty() && !parse_permutation_file(args, sample_intersection, permute_id_matrix))
+    return std::cerr << "Error: failed parsing permutation file file\n", EXIT_FAILURE;
+
 
   if (args.print_model_fit() && false)
   {
@@ -1191,7 +1240,7 @@ int trans_qtl_main(int argc, char** argv)
   //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
   output_wrapper output(args.output_path(), pheno_names, args.split_output());
 
-  if (!process_trans_batch(phenos, pheno_names, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output, args))
+  if (!process_trans_batch(phenos, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output, args))
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
 
 

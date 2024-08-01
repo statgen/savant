@@ -51,19 +51,26 @@ public:
 
     variable_stats() = default;
 
-    variable_stats(const std::vector<T>& vec)
+    variable_stats(T s, T ss) : sum_(s), sum_squared_(ss)
+    {
+    }
+
+    template <typename VT>
+    variable_stats(const std::vector<VT>& vec)
     {
       sum_ = std::accumulate(vec.begin(),  vec.end(), T());
       sum_squared_ = std::inner_product(vec.begin(),  vec.end(), vec.begin(), T());
     }
 
-    variable_stats(const xt::xtensor<T, 1>& vec)
+    template <typename VT>
+    variable_stats(const xt::xtensor<VT, 1>& vec)
     {
       sum_ = std::accumulate(vec.begin(),  vec.end(), T());
       sum_squared_ = std::inner_product(vec.begin(),  vec.end(), vec.begin(), T());
     }
 
-    variable_stats(const savvy::compressed_vector<T>& vec)
+    template <typename VT>
+    variable_stats(const savvy::compressed_vector<VT>& vec)
     {
       bool center = false;
       sum_ = std::accumulate(vec.begin(),  vec.end(), T());
@@ -193,6 +200,32 @@ public:
     const scalar_type dof = n - 2;
     //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
     const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    scalar_type t = m / std_err;
+
+    boost::math::students_t_distribution<scalar_type> dist(dof);
+
+    stats_t ret;
+    ret.pvalue = boost::math::cdf(complement(dist, std::fabs(std::isnan(t) ? 0 : t))) * 2;
+    ret.beta = m;
+    ret.se = std_err;
+    ret.t = t;
+    ret.r2 = r * r;
+
+    return ret;
+  }
+
+  static stats_t ols(std::size_t n, scalar_type s_xy, const variable_stats<scalar_type>& x_stats, const variable_stats<scalar_type>& y_stats, std::size_t dof)
+  {
+    scalar_type s_x = x_stats.sum();
+    scalar_type s_xx = x_stats.sum_squared();
+    scalar_type s_y = y_stats.sum();
+    scalar_type s_yy = y_stats.sum_squared();
+
+    const scalar_type m       = (n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+
+    scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
+
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
