@@ -22,9 +22,10 @@ private:
   //std::vector<option> long_options_;
   //std::string short_options_;
   std::string cov_path_;
-  std::string phenotype_field_;
+  //std::string phenotype_field_;
   std::string geno_path_;
   std::string pheno_path_;
+  std::string permutations_path_;
   std::string output_path_ = "/dev/stdout";
   std::string debug_log_path_ = "/dev/null";
   std::string fmt_field_ = "";
@@ -54,7 +55,8 @@ public:
       {"pass-only", "", '\x01', "Only test PASS variants"},
       {"max-pvalue", "<real>", '\x02', "Excludes association results from output when p-value is above this threshold"},
       {"split-output", "", '\x01', "Splits output into multiple files (one per phenotype)"},
-      {"print-model-fit", "", '\x01', "Produces file with statistics for regressing the phenotype on covariates"}})
+      {"print-model-fit", "", '\x01', "Produces file with statistics for regressing the phenotype on covariates"},
+      {"permutations", "<file>", 'p', "Path to file containing sample ID mappings for permutations"}})
   {
     //    long_options_.reserve(long_options_.size() + additional_options.size());
     //    long_options_.insert(--long_options_.end(), additional_options.begin(), additional_options.end());
@@ -78,6 +80,7 @@ public:
   const std::string& cov_path() const { return cov_path_; }
   const std::string& geno_path() const { return geno_path_; }
   const std::string& pheno_path() const { return pheno_path_; }
+  const std::string& perm_path() const { return permutations_path_; }
   const std::string& output_path() const { return output_path_; }
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
@@ -193,7 +196,7 @@ public:
         output_path_ = optarg ? optarg : "";
         break;
       case 'p':
-        phenotype_field_ = optarg ? optarg : "";
+        permutations_path_ = optarg ? optarg : "";
         break;
       case 'r':
         region_.reset(new savvy::genomic_region(utility::string_to_region(optarg ? optarg : "")));
@@ -279,6 +282,56 @@ bool parse_covariates_file(const qtl_prog_args& args, const std::vector<std::str
 
   if (match_count != ids.size())
     return std::cerr << "Error: missing covariates for " << (ids.size() - match_count) << " samples\n", false;
+  return true;
+}
+
+bool parse_permutation_file(const qtl_prog_args& args, const std::vector<std::string>& ids, std::vector<std::vector<std::size_t>>& dest)
+{
+  std::unordered_map<std::string, std::size_t> id_map;
+  id_map.reserve(ids.size());
+  for (std::size_t i = 0; i < ids.size(); ++i)
+    id_map[ids[i]] = i;
+  std::size_t match_count = 0, line_count = 0;
+
+  if (args.cov_path().empty())
+    return std::cerr << "Error: must pass separate covariates file\n", false;
+  std::string path = args.perm_path();
+  std::ifstream perm_file(path, std::ios::binary);
+
+  dest.clear();
+  std::string line;
+  char* p = nullptr;
+  while (std::getline(perm_file, line))
+  {
+    auto str_fields = utility::split_string_to_vector(line.c_str(), '\t');
+    if (str_fields.size() < 2)
+      return std::cerr << "Error: permutation file must have at least two columns\n", false;
+
+
+    if (dest.empty())
+      dest.resize(str_fields.size() - 1, std::vector<std::size_t>(id_map.size()));
+    else if (dest.size() != str_fields.size() - 1)
+      return std::cerr << "Error: permutation file must same number of columns for each line\n", false;
+
+    auto row_idx_it = id_map.find(str_fields[0]);
+    if (row_idx_it != id_map.end())
+    {
+      ++match_count;
+
+      for (std::size_t i = 1; i < str_fields.size(); ++i)
+      {
+        assert((i - 1) < dest.size());
+        auto perm_idx_it = id_map.find(str_fields[i]);
+        if (perm_idx_it == id_map.end())
+          return std::cerr << "Error: permutation file should contain only IDs from intersection of genotypes and phenotypes", false;
+        else
+          dest[i-1][row_idx_it->second] = perm_idx_it->second;
+      }
+    }
+  }
+
+  if (match_count != ids.size())
+    return std::cerr << "Error: missing permuation mapping for " << (ids.size() - match_count) << " samples\n", false;
   return true;
 }
 
@@ -904,15 +957,105 @@ public:
   }
 };
 
-template <typename GenoT>
-bool process_variant(const savvy::site_info& var, const std::vector<std::vector<scalar_type>>& pheno_resids, const std::vector<linear_model::variable_stats<scalar_type>>& pheno_stats,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, const savvy::compressed_vector<GenoT>& geno, std::vector<scalar_type>& geno_dense, const linear_model::variable_stats<scalar_type>& geno_stats, output_wrapper& output_file, const qtl_prog_args& args, std::size_t ploidy)
+class discovery_counter
 {
+private:
+  std::vector<std::vector<std::size_t>> counts_;
+public:
+//  discovery_counter(double min_maf)
+//  {
+//    assert(min_maf <= 1.);
+//    assert(min_maf > 0.);
+//    counts_.resize(1 + std::size_t(std::floor(-std::log10(min_maf))));
+//  }
+
+  template <typename T>
+  void operator()(double maf, const T& stats)
+  {
+    assert(maf <= 1.);
+    assert(maf > 0.);
+    std::size_t maf_idx = std::size_t(std::floor(-std::log10(maf)));
+    std::size_t pval_idx = std::size_t(std::floor(-std::log10(stats.pvalue)));
+    assert(maf_idx < counts_.size());
+    if (maf_idx >= counts_.size())
+      counts_.resize(maf_idx + 1);
+
+    if (pval_idx >= counts_[maf_idx].size())
+      counts_[maf_idx].resize(pval_idx + 1);
+
+    ++counts_[maf_idx][pval_idx];
+  }
+
+  static bool write(const std::vector<discovery_counter>& vec, std::ostream& ofs)
+  {
+    if (vec.empty())
+       return false;
+    std::size_t n_maf_bins = vec[0].counts_.size();
+    for (std::size_t i = 1; i < vec.size(); ++i)
+    {
+      if (n_maf_bins != vec[i].counts_.size())
+        return false;
+    }
+
+    ofs << "#maf_bin\tpval_bin";
+    for (std::size_t i = 0; i < vec.size(); ++i)
+      ofs << "\tcount" << i;
+    ofs << std::endl;
+
+    for (std::size_t maf_idx = 0; maf_idx < n_maf_bins; ++maf_idx)
+    {
+      bool keep_going = true;
+      for (std::size_t pval_idx = 0; keep_going; ++pval_idx)
+      {
+        keep_going = false;
+        bool has_non_zero = false;
+        for (auto it = vec.begin(); it != vec.end(); ++it)
+        {
+          if (pval_idx < it->counts_[maf_idx].size())
+          {
+            keep_going = true;
+            if (it->counts_[maf_idx][pval_idx] != 0)
+            {
+              has_non_zero = true;
+              break;
+            }
+          }
+        }
+
+        if (has_non_zero)
+        {
+          ofs << maf_idx << "\t" << pval_idx;
+          for (auto it = vec.begin(); it != vec.end(); ++it)
+          {
+            ofs.put('\t');
+            if (pval_idx < it->counts_[maf_idx].size())
+              ofs << it->counts_[maf_idx][pval_idx];
+            else
+              ofs.put('0');
+          }
+          ofs.put('\n');
+        }
+      }
+    }
+
+    return ofs.good();
+  }
+};
+
+template <typename GenoT>
+bool process_variant(const savvy::site_info& var, const std::vector<std::vector<scalar_type>>& pheno_resids, const std::vector<linear_model::variable_stats<scalar_type>>& pheno_stats,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, const savvy::compressed_vector<GenoT>& geno, std::vector<scalar_type>& geno_dense, const linear_model::variable_stats<scalar_type>& geno_stats, output_wrapper& output_file, const qtl_prog_args& args, std::size_t ploidy, std::vector<discovery_counter>& discovery_counts)
+{
+  std::size_t n_perm = 0;
+  if (!discovery_counts.empty())
+    n_perm = discovery_counts.size() - 1;
+  std::size_t stride = n_perm + 1;
+
   for (std::size_t pheno_idx = 0; pheno_idx < pheno_resids.size(); ++pheno_idx)
   {
     const std::vector<scalar_type>& pheno_ref = pheno_resids[pheno_idx];
     const std::vector<std::size_t>& pheno_map_ref = subset_non_missing_map[pheno_idx];
 
-    std::size_t n = pheno_resids[pheno_idx].size();
+    std::size_t n = pheno_resids[pheno_idx].size() / stride;
 
     scalar_type s_x = geno_stats.sum();
     scalar_type s_xx = geno_stats.sum_squared();
@@ -941,13 +1084,14 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
 
 
 
-    scalar_type s_xy = 0;
+    std::vector<scalar_type> s_xy(stride);
     for (auto it = geno.begin(); it != geno.end(); ++it)
     {
       std::size_t off = pheno_map_ref[it.offset()];
       if (off < n)
       {
-        s_xy += (*it) * pheno_ref[off];
+        for (std::size_t j = 0; j < stride; ++j)
+          s_xy[j] += (*it) * pheno_ref[off * stride + j];
       }
     }
 
@@ -965,12 +1109,13 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
     //            element = (element / stdev) * stdev_before;
     //          }
 
-    linear_model::stats_t stats{};
+    std::vector<linear_model::stats_t> stats(stride);
     if (args.resid_geno_threshold() < 1.)
     {
-      stats = linear_model::ols(n, s_xy, geno_stats_sub, pheno_stats[pheno_idx], n - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
+      for (std::size_t i = 0; i < stride; ++i)
+        stats[i] = linear_model::ols(n, s_xy[i], geno_stats_sub, pheno_stats[pheno_idx], n - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
     }
-    if (args.resid_geno_threshold() >= 1. || stats.pvalue <= args.resid_geno_threshold())
+    if (args.resid_geno_threshold() >= 1. || std::any_of(stats.begin(), stats.end(), [&args](const linear_model::stats_t& s) { return s.pvalue <= args.resid_geno_threshold(); }))
     {
       geno_dense.clear();
       geno_dense.resize(n);
@@ -982,17 +1127,38 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
       }
 
       geno_dense = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](geno_dense);
-      stats = linear_model::ols(geno_dense, pheno_resids[pheno_idx], linear_model::variable_stats<scalar_type>(geno_dense), pheno_stats[pheno_idx], geno_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
+      std::fill(s_xy.begin(), s_xy.end(), scalar_type());
+      for (std::size_t i = 0; i < geno_dense.size(); ++i)
+      {
+          for (std::size_t j = 0; j < stride; ++j)
+            s_xy[j] += geno_dense[i] * pheno_ref[i * stride + j];
+      }
+
+      std::vector<linear_model::stats_t> stats_dense(stride);
+      for (std::size_t i = 0; i < stride; ++i)
+        stats_dense[i] = linear_model::ols(n, s_xy[i], linear_model::variable_stats<scalar_type>(geno_dense), pheno_stats[pheno_idx], geno_dense.size() - (residualizers[residualizers.size() == 1 ? 0 : pheno_idx].n_predictors()) - 2);
+
+      for (std::size_t i = 0; i < stride; ++i)
+      {
+        if (args.resid_geno_threshold() >= 1. || stats[i].pvalue <= args.resid_geno_threshold())
+          stats[i] = stats_dense[i];
+      }
     }
 
-    if (stats.pvalue > args.max_pval()) continue;
-    if (!output_file.write(var, maf, mac, n, stats, pheno_idx))
+    if (stride > 1)
+    {
+      for (std::size_t i = 0; i < stride; ++i)
+        discovery_counts[i](maf, stats[i]);
+    }
+
+    if (stats[0].pvalue > args.max_pval()) continue;
+    if (!output_file.write(var, maf, mac, n, stats[0], pheno_idx))
       return std::cerr << "Error: failed writing to output file\n", false;
   }
   return true;
 }
 
-bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
+bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, const std::vector<std::vector<std::size_t>>& permutation_matrix, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
 {
   if (phenos.empty())
     return false;
@@ -1004,22 +1170,42 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
   std::shuffle(random_map.begin(), random_map.end(), prng);
   std::vector<scalar_type> tmp_resid;
 #endif
+
+  std::vector<discovery_counter> discovery_counts;
+  std::size_t n_perm = permutation_matrix.size();
   std::vector<linear_model::variable_stats<scalar_type>> pheno_stats(phenos.size());
   std::vector<std::vector<scalar_type>> pheno_resids(phenos.size());
-  for (std::size_t i = 0; i < phenos.size(); ++i)
+  for (std::size_t pheno_idx = 0; pheno_idx < phenos.size(); ++pheno_idx)
   {
-    pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i], args.invnorm());
-#if 0 // PERMUTATION
-    std::size_t dest_idx = 0;
-    pheno_resids[i] = residualizers[residualizers.size() == 1 ? 0 : i](phenos[i], args.invnorm());
-    for (std::size_t j = 0; j < subset_non_missing_map[i].size(); ++j)
+    pheno_resids[pheno_idx] = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](phenos[pheno_idx], args.invnorm());
+    pheno_stats[pheno_idx] = linear_model::variable_stats<scalar_type>(pheno_resids[pheno_idx]);
+
+#if 1 // PERMUTATION
+    if (n_perm)
     {
-      if (subset_non_missing_map[i][random_map[j]] < pheno_resids[i].size())
-        tmp_resid[dest_idx++] = pheno_resids[i][subset_non_missing_map[i][random_map[j]]];
+      assert(!subset_non_missing_map.empty());
+      std::size_t stride = n_perm + 1;
+      discovery_counts.resize(stride);
+      std::vector<scalar_type> tmp_pheno_with_perm(pheno_resids[pheno_idx].size() * stride, std::numeric_limits<scalar_type>::quiet_NaN());
+
+      for (std::size_t i = 0; i < pheno_resids[pheno_idx].size(); ++i)
+        tmp_pheno_with_perm[i * stride] = pheno_resids[pheno_idx][i];
+
+      for (std::size_t perm_idx = 0; perm_idx < n_perm; ++perm_idx)
+      {
+        std::size_t dest_idx = 0;
+        for (std::size_t i = 0; i < permutation_matrix[perm_idx].size(); ++i)
+        {
+          std::size_t primary_idx = subset_non_missing_map[pheno_idx][permutation_matrix[perm_idx][i]];
+          if (primary_idx < pheno_resids[pheno_idx].size())
+          {
+            tmp_pheno_with_perm[(dest_idx++) * stride + (perm_idx+1)] = pheno_resids[pheno_idx][primary_idx];
+          }
+        }
+        assert(dest_idx == pheno_resids[pheno_idx].size());
+      }
+      std::swap(pheno_resids[pheno_idx], tmp_pheno_with_perm);
     }
-    assert(dest_idx == pheno_resids.size());
-    std::swap(pheno_resids[i], tmp_resid);
-    pheno_stats[i] = linear_model::variable_stats<scalar_type>::gen_strided_stats(pheno_resids[i], 1 + n_perm);
 
 //    assert(i < pheno_resids.size());
 //    assert(i < subset_non_missing_map.size());
@@ -1036,10 +1222,10 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
 //        tmp_resid.push_back(pheno_resids[i][src_idx]);
 //    }
 //    pheno_resids[i] = tmp_resid;
-#else
-    pheno_stats[i] = linear_model::variable_stats<scalar_type>(pheno_resids[i]);
 #endif
   }
+
+  auto total_start = std::chrono::high_resolution_clock::now();
 
   savvy::compressed_vector<std::int8_t> geno;
   savvy::compressed_vector<std::int8_t> geno_sub;
@@ -1050,9 +1236,8 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
   {
     var.get_format("GT", geno);
 
-    std::int64_t an = geno.size();
     assert(!subset_non_missing_map.empty());
-    std::size_t ploidy = an / subset_non_missing_map[0].size();
+    std::size_t ploidy = geno.size() / subset_non_missing_map[0].size();
 
     if (var.alts().size() > 1)
     {
@@ -1069,7 +1254,7 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
         }
         savvy::stride_reduce(geno_biallele, ploidy, savvy::plus_eov<scalar_type>());
         linear_model::variable_stats<scalar_type> geno_stats(geno_biallele);
-        if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno_biallele, geno_dense, geno_stats, output_file, args, ploidy))
+        if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno_biallele, geno_dense, geno_stats, output_file, args, ploidy, discovery_counts))
           return false;
       }
     }
@@ -1077,9 +1262,24 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
     {
       savvy::stride_reduce(geno, ploidy, savvy::plus_eov<scalar_type>());
       linear_model::variable_stats<scalar_type> geno_stats(geno);
-      if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno, geno_dense, geno_stats, output_file, args, ploidy))
+      if (!process_variant(var, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, geno, geno_dense, geno_stats, output_file, args, ploidy, discovery_counts))
         return false;
     }
+  }
+
+  std::cerr << "total_duration:" << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - total_start).count() << std::endl;
+//  std::cerr << "subset_duration:" << std::chrono::duration_cast<std::chrono::seconds>(subset_duration).count() << std::endl;
+//  std::cerr << "stride_reduce_duration:" << std::chrono::duration_cast<std::chrono::seconds>(stride_reduce_duration).count() << std::endl;
+//  std::cerr << "stats_duration:" << std::chrono::duration_cast<std::chrono::seconds>(stats_duration).count() << std::endl;
+//  std::cerr << "ols_duration:" << std::chrono::duration_cast<std::chrono::seconds>(ols_duration).count() << std::endl;
+//  std::cerr << "ols_dense_duration:" << std::chrono::duration_cast<std::chrono::seconds>(ols_dense_duration).count() << std::endl;
+//  std::cerr << "write_duration (ms):" << std::chrono::duration_cast<std::chrono::microseconds>(write_duration).count() << std::endl;
+
+  if (!discovery_counts.empty())
+  {
+    std::ofstream discovery_file("discovery_counts.txt");
+    if (!discovery_counter::write(discovery_counts, discovery_file))
+      return std::cerr << "Error: failed writing discovery counts file\n", false;
   }
 
   return true;
@@ -1164,8 +1364,8 @@ int trans_qtl_main(int argc, char** argv)
   else if (!parse_covariates_file(args, sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
-  std::vector<std::vector<std::string>> permute_id_matrix;
-  if (!args.perm_path().empty() && !parse_permutation_file(args, sample_intersection, permute_id_matrix))
+  std::vector<std::vector<std::size_t>> permute_matrix;
+  if (!args.perm_path().empty() && !parse_permutation_file(args, sample_intersection, permute_matrix))
     return std::cerr << "Error: failed parsing permutation file file\n", EXIT_FAILURE;
 
 
@@ -1240,7 +1440,7 @@ int trans_qtl_main(int argc, char** argv)
   //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
   output_wrapper output(args.output_path(), pheno_names, args.split_output());
 
-  if (!process_trans_batch(phenos, residualizers, subset_non_missing_map, /* genos,*/ geno_file, output, args))
+  if (!process_trans_batch(phenos, residualizers, subset_non_missing_map, permute_matrix, /* genos,*/ geno_file, output, args))
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
 
 

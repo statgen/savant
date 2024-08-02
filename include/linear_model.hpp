@@ -30,13 +30,14 @@ protected:
 public:
   struct stats_t
   {
-    scalar_type pvalue;
-    scalar_type beta;
-    scalar_type se;
-    scalar_type t;
-    scalar_type r2;
+    scalar_type pvalue = scalar_type();
+    scalar_type beta = scalar_type();
+    scalar_type se = scalar_type();
+    scalar_type t = scalar_type();
+    scalar_type r2 = scalar_type();
 
     static std::string header_column_names() { return "pvalue\tbeta\tse\ttstat\tr2"; }
+    stats_t() {}
   };
 
   template <typename T>
