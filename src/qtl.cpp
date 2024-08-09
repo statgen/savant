@@ -26,6 +26,7 @@ private:
   std::string geno_path_;
   std::string pheno_path_;
   std::string permutations_path_;
+  std::string discovery_counts_path_;
   std::string output_path_ = "/dev/stdout";
   std::string debug_log_path_ = "/dev/null";
   std::string fmt_field_ = "";
@@ -34,6 +35,7 @@ private:
   double min_maf_ = 0.f;
   double max_pval_ = 2.;
   double resid_geno_threshold_ = -1.;
+  std::uint32_t seed_ = 7;
   bool split_output_ = false;
   bool help_ = false;
   bool invnorm_ = false;
@@ -44,6 +46,7 @@ public:
     getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
       {"cov", "<file>", 'c', "Covariates file"},
       {"debug-log", "<file>", '\x02', "Enables debug logging and specifies log file"},
+      {"discovery-counts", "<file>", '\x02', "Writes discovery counts to specified file for use in empirical FDR calculation"},
       {"fmt-field", "<string>", '\x02', "Format field to use (DS, HDS, or GT)"},
       {"help", "", 'h', "Print Usage"},
       {"inv-norm", "", '\x01', "Inverse normalize response"},
@@ -81,6 +84,7 @@ public:
   const std::string& geno_path() const { return geno_path_; }
   const std::string& pheno_path() const { return pheno_path_; }
   const std::string& perm_path() const { return permutations_path_; }
+  const std::string& discovery_counts_path() const { return discovery_counts_path_; }
   const std::string& output_path() const { return output_path_; }
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
@@ -90,6 +94,7 @@ public:
   double max_pval() const { return max_pval_; }
   double resid_geno_threshold() const { return resid_geno_threshold_; }
   std::int64_t window_size() const { return 48; } // TODO: remove
+  std::uint32_t seed() const { return seed_; }
   bool split_output() const { return split_output_; }
   bool print_model_fit() const { return print_model_fit_; }
   bool help_is_set() const { return help_; }
@@ -172,6 +177,10 @@ public:
         else if (std::string("debug-log") == long_options_[long_index].name)
         {
           debug_log_path_ = optarg ? optarg : "";
+        }
+        else if (std::string("discovery-counts") == long_options_[long_index].name)
+        {
+          discovery_counts_path_ = optarg ? optarg : "";
         }
         else if (std::string("max-pvalue") == long_options_[long_index].name)
         {
@@ -1277,7 +1286,7 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
 
   if (!discovery_counts.empty())
   {
-    std::ofstream discovery_file("discovery_counts.txt");
+    std::ofstream discovery_file(args.discovery_counts_path());
     if (!discovery_counter::write(discovery_counts, discovery_file))
       return std::cerr << "Error: failed writing discovery counts file\n", false;
   }
@@ -1365,8 +1374,21 @@ int trans_qtl_main(int argc, char** argv)
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
   std::vector<std::vector<std::size_t>> permute_matrix;
-  if (!args.perm_path().empty() && !parse_permutation_file(args, sample_intersection, permute_matrix))
-    return std::cerr << "Error: failed parsing permutation file file\n", EXIT_FAILURE;
+  if (!args.discovery_counts_path().empty())
+  {
+    if (args.perm_path().empty())
+    {
+      permute_matrix.resize(1, {sample_intersection.size()});
+      std::iota(permute_matrix.front().begin(), permute_matrix.front().end(), 0);
+      std::default_random_engine prng{args.seed()};
+      std::shuffle(permute_matrix.front().begin(), permute_matrix.front().end(), prng);
+    }
+    else
+    {
+      if (!parse_permutation_file(args, sample_intersection, permute_matrix))
+        return std::cerr << "Error: failed parsing permutation file file\n", EXIT_FAILURE;
+    }
+  }
 
 
   if (args.print_model_fit() && false)
