@@ -1356,6 +1356,7 @@ int trans_qtl_main(int argc, char** argv)
   savvy::reader geno_file(args.geno_path());
   if (!geno_file)
     return std::cerr << "Could not open geno file\n", EXIT_FAILURE;
+  geno_file.phasing_status(savvy::phasing::none); // Faster parsing of BCF/VCF
 
   if (args.region() && !geno_file.reset_bounds(*args.region()))
     return std::cerr << "Could not open genomic region\n", EXIT_FAILURE;
