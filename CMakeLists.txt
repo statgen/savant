@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.2)
-project(savant VERSION 0.1.0)
+project(savant VERSION 0.2.0)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
