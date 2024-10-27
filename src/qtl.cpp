@@ -754,8 +754,8 @@ bool process_cis_batch(const std::vector<bed_file::record>& phenos,  std::vector
                       << "\t" << var.ref()
                       << "\t" << (var.alts().empty() ? "." : var.alts()[0])
                       << "\t" << var.id()
-                      << "\t" << maf
-                      << "\t" << mac
+                      << "\t" << af
+                      << "\t" << ac
                       << "\t" << an/ploidy
                       << "\t" << phenos[pheno_idx].pheno_id()
                       << "\t" << phenos[pheno_idx].chrom()
@@ -827,7 +827,7 @@ int cis_qtl_main(int argc, char** argv)
   cov_mat = cov_mat - xt::mean(cov_mat, {0});
 
   shrinkwrap::bgzf::ostream output_file(args.output_path());
-  output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\tpheno_id\tpheno_chrom\tpheno_beg\tpheno_end\t" << linear_model::stats_t::header_column_names() << std::endl;
+  output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\taf\tac\tns\tpheno_id\tpheno_chrom\tpheno_beg\tpheno_end\t" << linear_model::stats_t::header_column_names() << std::endl;
 
   std::size_t batch_size = 10;
   std::vector<bed_file::record> phenos;
