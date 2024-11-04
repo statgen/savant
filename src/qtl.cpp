@@ -937,14 +937,14 @@ public:
 
     for (std::size_t i = 0; i < out_files.size(); ++i)
     {
-      *out_files[i] << "chrom\tpos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names();
+      *out_files[i] << "chrom\tpos\tref\talt\tvariant_id\taf\tac\tns\t" << linear_model::stats_t::header_column_names();
       if(!split_)
         *out_files[i] << "\tpheno_id";
       *out_files[i] << std::endl;
     }
   }
 
-  bool write(const savvy::site_info& var, float maf, std::int64_t mac, std::int64_t ns, const linear_model::stats_t& stats, std::size_t pheno_idx)
+  bool write(const savvy::site_info& var, float af, std::int64_t ac, std::int64_t ns, const linear_model::stats_t& stats, std::size_t pheno_idx)
   {
     std::size_t file_idx = 0;
     if (split_)
@@ -954,8 +954,8 @@ public:
        << "\t" << var.ref()
        << "\t" << (var.alts().empty() ? "." : var.alts()[0])
        << "\t" << var.id()
-       << "\t" << maf
-       << "\t" << mac
+       << "\t" << af
+       << "\t" << ac
        << "\t" << ns
        << "\t" << stats;
     if (!split_)
@@ -1161,7 +1161,7 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
     }
 
     if (stats[0].pvalue > args.max_pval()) continue;
-    if (!output_file.write(var, maf, mac, n, stats[0], pheno_idx))
+    if (!output_file.write(var, af, ac, n, stats[0], pheno_idx))
       return std::cerr << "Error: failed writing to output file\n", false;
   }
   return true;
