@@ -964,6 +964,18 @@ public:
 
     return out_files[file_idx]->good();
   }
+
+  bool close()
+  {
+    for (std::size_t i = 0; i < out_files.size(); ++i)
+    {
+      out_files[i]->flush();
+      if (!out_files[i]->good())
+        return std::cerr << "Error: output file close failure\n", false;
+    }
+
+    return true;
+  }
 };
 
 class discovery_counter
@@ -1277,6 +1289,10 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
   }
 
   std::cerr << "total_duration:" << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - total_start).count() << std::endl;
+
+  if (geno_file.bad())
+    return std::cerr << "Error: input file read error\n", false;
+
 //  std::cerr << "subset_duration:" << std::chrono::duration_cast<std::chrono::seconds>(subset_duration).count() << std::endl;
 //  std::cerr << "stride_reduce_duration:" << std::chrono::duration_cast<std::chrono::seconds>(stride_reduce_duration).count() << std::endl;
 //  std::cerr << "stats_duration:" << std::chrono::duration_cast<std::chrono::seconds>(stats_duration).count() << std::endl;
@@ -1289,6 +1305,9 @@ bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  c
     std::ofstream discovery_file(args.discovery_counts_path());
     if (!discovery_counter::write(discovery_counts, discovery_file))
       return std::cerr << "Error: failed writing discovery counts file\n", false;
+    discovery_file.close();
+    if (!discovery_file.good())
+      return std::cerr << "Error: failed closing discovery counts file\n", false;
   }
 
   return true;
@@ -1467,5 +1486,5 @@ int trans_qtl_main(int argc, char** argv)
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
 
 
-  return EXIT_SUCCESS;
+  return output.close() ?  EXIT_SUCCESS : EXIT_FAILURE;
 }
