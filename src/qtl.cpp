@@ -1097,9 +1097,9 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
     double mac = (ac > (an/2.f) ? an - ac : ac);
     double maf = (af > 0.5f ? 1.f - af : af);
 
-    if (an == 0) return true;
-    if (mac < args.min_mac()) return true;
-    if (maf < args.min_maf()) return true;
+    if (an == 0) continue;
+    if (mac < args.min_mac()) continue;
+    if (maf < args.min_maf()) continue;
 
     //savvy::stride_reduce(geno_sub, ploidy, savvy::plus_eov<scalar_type>());
 
