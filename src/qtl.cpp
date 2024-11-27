@@ -997,7 +997,7 @@ public:
     assert(maf > 0.);
     std::size_t maf_idx = std::size_t(std::floor(-std::log10(maf)));
     std::size_t pval_idx = std::size_t(std::floor(-std::log10(stats.pvalue)));
-    assert(maf_idx < counts_.size());
+    
     if (maf_idx >= counts_.size())
       counts_.resize(maf_idx + 1);
 
