@@ -17,5 +17,11 @@ target_compile_definitions(savant PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
 target_include_directories(savant PRIVATE include ${Boost_INCLUDE_DIRS})
 target_link_libraries(savant savvy xtensor-blas ${OMP_LIB} ${CMAKE_THREAD_LIBS_INIT})
 
+add_executable(savant-prune src/ld_prune.cpp)
+target_compile_definitions(savant-prune PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
+target_include_directories(savant-prune PRIVATE include)
+target_link_libraries(savant-prune savvy ${OMP_LIB} ${CMAKE_THREAD_LIBS_INIT})
+
+
 
 install(TARGETS savant RUNTIME DESTINATION bin)
