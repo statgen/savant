@@ -148,7 +148,7 @@ double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_ve
   return std::numeric_limits<float>::quiet_NaN();
 }
 
-class variant_id
+class variant_id_t
 {
 public:
   std::string chrom;
@@ -165,7 +165,7 @@ public:
     return false;
   }
 
-  bool operator==(const variant_id& other) const
+  bool operator==(const variant_id_t& other) const
   {
     return (chrom == other.chrom
             && pos == other.pos
@@ -173,7 +173,7 @@ public:
             && alt == other.alt);
   }
 
-  bool operator!=(const variant_id& other) const
+  bool operator!=(const variant_id_t& other) const
   {
     return !(operator==(other));
   }
@@ -186,12 +186,14 @@ static std::size_t hash_combine(std::size_t seed, const T& val)
   return seed;
 }
 
-template <>
-struct std::hash<variant_id>
+namespace std
 {
-  std::size_t operator()(const variant_id& k) const
+template <>
+struct hash<variant_id_t>
+{
+  size_t operator()(const variant_id_t& k) const
   {
-    std::size_t ret = 7;
+    size_t ret = 7;
     ret = hash_combine(ret, k.chrom);
     ret = hash_combine(ret, k.pos);
     ret = hash_combine(ret, k.ref);
@@ -199,6 +201,7 @@ struct std::hash<variant_id>
     return ret;
   }
 };
+}
 
 class results_file
 {
@@ -211,7 +214,7 @@ public:
   {
   private:
     std::string line_;
-    variant_id variant_id_;
+    variant_id_t variant_id_;
     double pvalue_ = 2.;
     std::string pheno_id_;
     std::int32_t prune_group_ = 0;
@@ -224,7 +227,7 @@ public:
     std::int32_t group() const { return prune_group_; }
     void set_tophit(bool v = true) { tophit_ = v; }
     bool tophit() const { return tophit_; }
-    const variant_id& variant_id() const { return variant_id_; }
+    const variant_id_t& variant_id() const { return variant_id_; }
     void set_genotype_index(std::size_t idx) { genotype_idx_ = idx; }
     std::size_t genotype_index() const {  return genotype_idx_; }
     const std::string& serialized_line() const { return line_; }
@@ -331,7 +334,7 @@ int main(int argc, char** argv)
 
 
   //std::unordered_map<variant_id, savvy::compressed_vector<std::int8_t>> variant_data;
-  std::vector<variant_id> variant_ids;
+  std::vector<variant_id_t> variant_ids;
 
   records.emplace_back();
   while (input_results >> records.back())
