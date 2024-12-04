@@ -70,6 +70,8 @@ public:
         break;
       case 's':
         r2_threshold_ = std::atof(optarg ? optarg : "");
+        if (r2_threshold_ <= 0. || r2_threshold_ > 1.)
+          return std::cerr << "Error: --r2-threshold must be in range 0 < x <= 1", false;
         break;
       case 'v':
         version_ = true;
@@ -214,14 +216,18 @@ public:
     std::string pheno_id_;
     std::int32_t prune_group_ = 0;
     std::size_t genotype_idx_ = std::size_t(-1);
+    bool tophit_ = false;
   public:
     double pvalue() const { return pvalue_; }
     const std::string& pheno_id() const { return pheno_id_; }
     void set_group(std::int32_t v) { prune_group_ = v; }
     std::int32_t group() const { return prune_group_; }
+    void set_tophit(bool v = true) { tophit_ = v; }
+    bool tophit() const { return tophit_; }
     const variant_id& variant_id() const { return variant_id_; }
     void set_genotype_index(std::size_t idx) { genotype_idx_ = idx; }
     std::size_t genotype_index() const {  return genotype_idx_; }
+    const std::string& serialized_line() const { return line_; }
 
     bool matches(const savvy::site_info& s) const
     {
@@ -279,8 +285,9 @@ public:
     return *this;
   }
 
-  explicit operator bool() const { return (bool)ifs_; }
+  const std::string& header_line() const { return header_line_; }
 
+  explicit operator bool() const { return (bool)ifs_; }
   bool bad() const { return ifs_.bad(); }
   bool good() const { return ifs_.good(); }
   bool fail() const { return ifs_.fail(); }
@@ -313,6 +320,12 @@ int main(int argc, char** argv)
   if (!input_results)
     return std::cerr << "Error: opening association results input file failed\n", EXIT_FAILURE;
 
+  shrinkwrap::bgzf::ostream output_file(args.output_path());
+  if (!output_file)
+    return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
+
+  output_file << input_results.header_line() << "\tprune_group" << std::endl;
+
   std::list<results_file::record> records;
   std::unordered_map<std::string, std::vector<results_file::record*>> pheno_results;
 
@@ -323,6 +336,8 @@ int main(int argc, char** argv)
   records.emplace_back();
   while (input_results >> records.back())
   {
+    if (!args.write_all() && records.back().pvalue() > args.pval_threshold()) continue;
+
     if (records.back().pvalue() <= args.pval_threshold())
     {
       pheno_results[records.back().pheno_id()].push_back(&records.back());
@@ -336,7 +351,7 @@ int main(int argc, char** argv)
   records.pop_back();
 
   if (input_results.bad())
-    return EXIT_FAILURE;
+    return std::cerr << "Error: failed loading association results input file\n", EXIT_FAILURE;
   //========== END Load results ==========//
 
 
@@ -364,6 +379,9 @@ int main(int argc, char** argv)
       }
     }
     regions.push_back(r);
+
+    if (!index_file.good())
+      return std::cerr << "Error: failure during SAV index query\n", EXIT_FAILURE;
   }
   //========== END Determine most efficient regions for querying genotypes ==========//
 
@@ -400,11 +418,15 @@ int main(int argc, char** argv)
         }
       }
     }
+
+    if (geno_file.bad())
+      return std::cerr << "Error: failed to reading from genotype file\n", EXIT_FAILURE;
   }
   //========== END Load genotypes ==========//
 
 
   //========== Run clumping ==========//
+  std::vector<std::int8_t> dense_geno;
   for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
   {
     if (it->second.size() == 1 && it->second[0]->pvalue() <= args.pval_threshold())
@@ -415,8 +437,7 @@ int main(int argc, char** argv)
     {
       assert(it->second.size() > 0);
 
-      std::int32_t group_idx = 1;
-      while (it->second.size())
+      for (std::int32_t group = 1; it->second.size() > 0; ++group)
       {
         double min_pvalue = 2.;
         std::size_t min_idx = std::size_t(-1);
@@ -432,15 +453,23 @@ int main(int argc, char** argv)
 
         assert(min_idx < it->second.size());
 
-        it->second[group_idx]->set_group(group_idx);
-        // TODO: set_tophit()
+        it->second[min_idx]->set_group(group);
+        it->second[min_idx]->set_tophit();
+
+        assert(it->second[min_idx]->genotype_index() < genotypes.size());
+        auto& top_sparse_geno = genotypes[it->second[min_idx]->genotype_index()];
+        dense_geno.clear();
+        dense_geno.resize(top_sparse_geno.size());
+        for (auto gt = top_sparse_geno.begin(); gt != top_sparse_geno.end(); ++gt)
+          dense_geno[gt.offset()] = *gt;
+
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
           if (i != min_idx)
           {
-            /*TODO: double r2 = compute_r2(target_geno_dense, target_geno, other_geno, args.r2_threshold());
+            double r2 = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
             if (r2 >= args.r2_threshold())
-              it->second[i]->set_group(group_idx);*/
+              it->second[i]->set_group(group);
           }
         }
 
@@ -448,7 +477,7 @@ int main(int argc, char** argv)
         std::size_t dest = 0;
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
-          if (it->second[i]->group() != group_idx)
+          if (it->second[i]->group() != group)
           {
             if (i > dest)
               it->second[dest] = it->second[i];
@@ -460,6 +489,19 @@ int main(int argc, char** argv)
     }
   }
   //========== END Run clumping ==========//
+
+  //========== Write output ==========//
+  for (auto it = records.begin(); it != records.end() && output_file; ++it)
+  {
+    if (args.write_all() || it->tophit())
+    {
+      output_file << it->serialized_line() << "\t" << it->group() << "\n";
+    }
+  }
+
+  if (!output_file)
+    return std::cerr << "Error: failed to write output records\n", EXIT_FAILURE;
+  //========== END Write output ==========//
 
   return EXIT_SUCCESS;
 }
