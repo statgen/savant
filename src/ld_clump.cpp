@@ -14,7 +14,7 @@
 
 #include "getopt_wrapper.hpp"
 
-class prune_prog_args : public getopt_wrapper
+class clump_prog_args : public getopt_wrapper
 {
 private:
   std::string geno_path_;
@@ -28,18 +28,18 @@ private:
   bool help_ = false;
   bool version_ = false;
 public:
-  prune_prog_args() :
-    getopt_wrapper("Usage: savant-prune [opts ...] <geno_file> <results_file>", {
+  clump_prog_args() :
+    getopt_wrapper("Usage: savant-clump [opts ...] <geno_file> <results_file>", {
       {"help", "", 'h', "Print usage"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"max-pvalue", "<real>", 'p', "Max p-value to clump"},
       {"r2-threshold", "<real>", 's', "R-squared threshold for clumping (default: 0.2)"},
-      {"top-hits", "", 'a', "Only write most significant association from each LD group to output"},
+      {"write-all", "", 'a', "Write all records to output instead of only the most significant association from each LD group"},
       {"version", "", 'v', "Print version"}})
   {
   }
 
-  virtual ~prune_prog_args() {}
+  virtual ~clump_prog_args() {}
   const std::string& geno_path() const { return geno_path_; }
   const std::string& output_path() const { return output_path_; }
   const std::string& results_path() const { return results_path_; }
@@ -217,14 +217,14 @@ public:
     variant_id_t variant_id_;
     double pvalue_ = 2.;
     std::string pheno_id_;
-    std::int32_t prune_group_ = 0;
+    std::int32_t clump_group_ = 0;
     std::size_t genotype_idx_ = std::size_t(-1);
     bool tophit_ = false;
   public:
     double pvalue() const { return pvalue_; }
     const std::string& pheno_id() const { return pheno_id_; }
-    void set_group(std::int32_t v) { prune_group_ = v; }
-    std::int32_t group() const { return prune_group_; }
+    void set_group(std::int32_t v) { clump_group_ = v; }
+    std::int32_t group() const { return clump_group_; }
     void set_tophit(bool v = true) { tophit_ = v; }
     bool tophit() const { return tophit_; }
     const variant_id_t& variant_id() const { return variant_id_; }
@@ -299,7 +299,7 @@ public:
 
 int main(int argc, char** argv)
 {
-  prune_prog_args args;
+  clump_prog_args args;
   if (!args.parse(argc, argv))
   {
     args.print_usage(std::cerr);
@@ -314,7 +314,7 @@ int main(int argc, char** argv)
 
   if (args.version_is_set())
   {
-    std::cout << "savant-prune v" << SAVANT_VERSION << std::endl;
+    std::cout << "savant-clump v" << SAVANT_VERSION << std::endl;
     return EXIT_SUCCESS;
   }
 
@@ -327,7 +327,7 @@ int main(int argc, char** argv)
   if (!output_file)
     return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
 
-  output_file << input_results.header_line() << "\tprune_group" << std::endl;
+  output_file << input_results.header_line() << "\tclump_group" << std::endl;
 
   std::list<results_file::record> records;
   std::unordered_map<std::string, std::vector<results_file::record*>> pheno_results;
