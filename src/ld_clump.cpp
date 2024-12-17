@@ -221,9 +221,10 @@ int main(int argc, char** argv)
   std::vector<std::int8_t> dense_geno;
   for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
   {
-    if (it->second.size() == 1 && it->second[0]->pvalue() <= args.pval_threshold())
+    if (it->second.size() == 1 && it->second[0]->pvalue() <= args.pval_threshold()) // TODO: this condition should be unnecessary
     {
       it->second[0]->set_group(1);
+      it->second[0]->tophit();
     }
     else
     {
