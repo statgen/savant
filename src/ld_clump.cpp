@@ -11,8 +11,10 @@
 #include <cmath>
 #include <cstdlib>
 #include <list>
+#include <numeric>
 
 #include "getopt_wrapper.hpp"
+#include "summary_stats_input.hpp"
 
 class clump_prog_args : public getopt_wrapper
 {
@@ -108,6 +110,32 @@ public:
 
 typedef savvy::compressed_vector<std::int8_t> vec_t;
 
+/*double compute_r2_v2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_vec, const vec_t& j_vec, double min_r2_threshold)
+{
+  assert(i_vec_dense.size() == i_vec.size());
+  assert(i_vec.size() == j_vec.size());
+  std::size_t n = i_vec_dense.size();
+
+  double s_xy = 0.;
+  for (auto it = j_vec.begin(); it != j_vec.end(); ++it)
+    s_xy += *it * i_vec_dense[it.offset()];
+
+  double s_x = std::accumulate(i_vec_dense.begin(), i_vec_dense.end(), 0.);
+  double s_y = std::accumulate(j_vec.begin(), j_vec.end(), 0.);
+
+  double s_xx = std::inner_product(i_vec_dense.begin(), i_vec_dense.end(), i_vec_dense.begin(), 0.);
+  double s_yy = std::inner_product(j_vec.begin(), j_vec.end(), j_vec.begin(), 0.);
+
+
+  double x_mean = s_x / n;
+  double y_mean = s_y / n;
+  double r = (s_xy - n * x_mean * y_mean) / (std::sqrt(s_xx - x_mean * x_mean * n) * std::sqrt(s_yy - y_mean * y_mean * n));
+  double r2 = r * r;
+
+  double R = (s_xy - n * x_mean * y_mean) / ((n-1) * s_x * s_y);
+  return r2;
+}*/
+
 double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_vec, const vec_t& j_vec, double min_r2_threshold)
 {
 
@@ -136,7 +164,7 @@ double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_ve
     }
 
     // Dot product
-    double p = 0.f;
+    double p = 0.;
     for (auto it = j_vec.begin(); it != j_vec.end(); ++it)
       p += *it * i_vec_dense[it.offset()];
 
@@ -148,154 +176,7 @@ double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_ve
   return std::numeric_limits<float>::quiet_NaN();
 }
 
-class variant_id_t
-{
-public:
-  std::string chrom;
-  std::int64_t pos = 0;
-  std::string ref;
-  std::string alt;
 
-  std::string to_string() const { return chrom + ":" + std::to_string(pos) + ":" + ref + ":" + alt; }
-
-  bool matches(const savvy::site_info& s) const
-  {
-    if (s.chrom() == chrom && s.pos() == pos && s.ref() == ref && (s.alts().empty() ? "" : s.alts()[0]) == alt) // TODO: support multiallelics
-      return true;
-    return false;
-  }
-
-  bool operator==(const variant_id_t& other) const
-  {
-    return (chrom == other.chrom
-            && pos == other.pos
-            && ref == other.ref
-            && alt == other.alt);
-  }
-
-  bool operator!=(const variant_id_t& other) const
-  {
-    return !(operator==(other));
-  }
-};
-
-template <typename T>
-static std::size_t hash_combine(std::size_t seed, const T& val)
-{
-  seed ^= std::hash<T>()(val) + 0x9e3779b9 + (seed<<6) + (seed>>2);
-  return seed;
-}
-
-namespace std
-{
-template <>
-struct hash<variant_id_t>
-{
-  size_t operator()(const variant_id_t& k) const
-  {
-    size_t ret = 7;
-    ret = hash_combine(ret, k.chrom);
-    ret = hash_combine(ret, k.pos);
-    ret = hash_combine(ret, k.ref);
-    ret = hash_combine(ret, k.alt);
-    return ret;
-  }
-};
-}
-
-class results_file
-{
-private:
-  shrinkwrap::gz::istream ifs_;
-  std::string header_line_;
-  bool has_pheno_id_column_ = false;
-public:
-  class record
-  {
-  private:
-    std::string line_;
-    variant_id_t variant_id_;
-    double pvalue_ = 2.;
-    std::string pheno_id_;
-    std::int32_t clump_group_ = 0;
-    std::size_t genotype_idx_ = std::size_t(-1);
-    bool tophit_ = false;
-  public:
-    double pvalue() const { return pvalue_; }
-    const std::string& pheno_id() const { return pheno_id_; }
-    void set_group(std::int32_t v) { clump_group_ = v; }
-    std::int32_t group() const { return clump_group_; }
-    void set_tophit(bool v = true) { tophit_ = v; }
-    bool tophit() const { return tophit_; }
-    const variant_id_t& variant_id() const { return variant_id_; }
-    void set_genotype_index(std::size_t idx) { genotype_idx_ = idx; }
-    std::size_t genotype_index() const {  return genotype_idx_; }
-    const std::string& serialized_line() const { return line_; }
-
-    bool matches(const savvy::site_info& s) const
-    {
-      return variant_id_.matches(s);
-    }
-
-    static bool deserialize(record& self, std::istream& ifs, bool expect_pheno_column)
-    {
-      if (!std::getline(ifs, self.line_))
-        return false;
-
-      std::size_t end_i = expect_pheno_column ? 14 : 9;
-      std::size_t start_pos = 0;
-      for (std::size_t i = 0; i < end_i; ++i)
-      {
-        std::size_t pos = self.line_.find('\t', start_pos);
-        if (pos == std::string::npos && i + 1 != end_i)
-        {
-          std::cerr << "Error: results file missing " << (i + 1) << " column" << std::endl;
-          ifs.setstate(ifs.rdstate() | std::ios::badbit);
-          return false;
-        }
-
-        if (i == 0)
-          self.variant_id_.chrom = self.line_.substr(start_pos, pos - start_pos);
-        else if (i == 1)
-          self.variant_id_.pos = std::atoll(self.line_.substr(start_pos, pos - start_pos).c_str());
-        else if (i == 2)
-          self.variant_id_.ref = self.line_.substr(start_pos, pos - start_pos);
-        else if (i == 3)
-          self.variant_id_.alt = self.line_.substr(start_pos, pos - start_pos);
-        else if (i == 8)
-          self.pvalue_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
-        else if (i == 13)
-          self.pheno_id_ = self.line_.substr(start_pos, pos - start_pos);
-
-        start_pos = pos + 1;
-      }
-
-      return true;
-    }
-  };
-
-  results_file(const std::string& file_path) :
-    ifs_(file_path)
-  {
-    std::getline(ifs_, header_line_);
-    if (header_line_.size() > 8 && header_line_.substr(header_line_.size() - 8) == "pheno_id")
-      has_pheno_id_column_ = true;
-  }
-
-  results_file& operator>>(record& rec)
-  {
-    record::deserialize(rec, ifs_, has_pheno_id_column_);
-    return *this;
-  }
-
-  const std::string& header_line() const { return header_line_; }
-
-  explicit operator bool() const { return (bool)ifs_; }
-  bool bad() const { return ifs_.bad(); }
-  bool good() const { return ifs_.good(); }
-  bool fail() const { return ifs_.fail(); }
-  bool eof() const { return ifs_.eof(); }
-};
 
 int main(int argc, char** argv)
 {
@@ -318,115 +199,23 @@ int main(int argc, char** argv)
     return EXIT_SUCCESS;
   }
 
-  //========== Load results ==========//
+  //========== Load input ==========//
   results_file input_results(args.results_path());
   if (!input_results)
     return std::cerr << "Error: opening association results input file failed\n", EXIT_FAILURE;
 
-  shrinkwrap::bgzf::ostream output_file(args.output_path());
-  if (!output_file)
-    return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
-
-  output_file << input_results.header_line() << "\tclump_group" << std::endl;
-
   std::list<results_file::record> records;
   std::unordered_map<std::string, std::vector<results_file::record*>> pheno_results;
-
-
-  //std::unordered_map<variant_id, savvy::compressed_vector<std::int8_t>> variant_data;
   std::vector<variant_id_t> variant_ids;
-
-  records.emplace_back();
-  while (input_results >> records.back())
-  {
-    if (!args.write_all() && records.back().pvalue() > args.pval_threshold()) continue;
-
-    if (records.back().pvalue() <= args.pval_threshold())
-    {
-      pheno_results[records.back().pheno_id()].push_back(&records.back());
-      if (variant_ids.empty() || variant_ids.back() != records.back().variant_id())
-        variant_ids.push_back(records.back().variant_id());
-      records.back().set_genotype_index(variant_ids.size() - 1);
-      // TODO: try to detect if records are not sorted by genomic position.=
-    }
-    records.emplace_back();
-  }
-  records.pop_back();
+  results_file::read(input_results, records, pheno_results, variant_ids, args.pval_threshold(), args.write_all());
 
   if (input_results.bad())
     return std::cerr << "Error: failed loading association results input file\n", EXIT_FAILURE;
-  //========== END Load results ==========//
 
-
-  //========== Determine most efficient regions for querying genotypes ==========//
-  savvy::s1r::reader index_file(args.geno_path());
-  if (!index_file.good())
-    return std::cerr << "Error: could not open SAV index\n", EXIT_FAILURE;
-
-  std::list<savvy::genomic_region> regions;
-
-
-  std::size_t i = 0;
-  while (i < variant_ids.size())
-  {
-    savvy::genomic_region r(variant_ids[i].chrom, variant_ids[i].pos, variant_ids[i].pos);
-    auto q = index_file.create_query(savvy::genomic_region(variant_ids[i].chrom, variant_ids[i].pos, variant_ids[i].pos));
-    ++i;
-    for (auto it = q.begin(); it != q.end(); ++it)
-    {
-      while (i < variant_ids.size() && variant_ids[i].pos >= it->region_start() && variant_ids[i].pos <= it->region_end())
-      {
-        r = savvy::genomic_region(r.chromosome(), r.from(), variant_ids[i].pos);
-        assert(r.from() <= r.to());
-        ++i;
-      }
-    }
-    regions.push_back(r);
-
-    if (!index_file.good())
-      return std::cerr << "Error: failure during SAV index query\n", EXIT_FAILURE;
-  }
-  //========== END Determine most efficient regions for querying genotypes ==========//
-
-
-  //========== Load genotypes ==========//
-  std::vector<savvy::compressed_vector<std::int8_t>> genotypes(variant_ids.size());
-  savvy::reader geno_file(args.geno_path());
-  if (!geno_file)
-    return std::cerr << "Error: failed to open genotype file\n", EXIT_FAILURE;
-
-  auto id_it = variant_ids.begin();
-  savvy::variant var;
-  for (const auto& r : regions)
-  {
-    if (!geno_file.reset_bounds(r))
-      return std::cerr << "Error: failed to query region from genotype file\n", EXIT_FAILURE;
-
-    while (id_it != variant_ids.end() && geno_file >> var)
-    {
-      while(id_it != variant_ids.end() && var.pos() > id_it->pos)
-      {
-        if (genotypes[id_it - variant_ids.begin()].size() == 0)
-          return std::cerr << "Error: could not find " << id_it->to_string() << " in genotype file\n", EXIT_FAILURE;
-        ++id_it;
-      }
-
-      for  (auto lit = id_it; lit != variant_ids.end() && var.pos() == lit->pos; ++lit)
-      {
-        if (lit->matches(var))
-        {
-          std::size_t gidx = lit - variant_ids.begin();
-          var.get_format("GT", genotypes[gidx]);
-          assert(genotypes[gidx].size());
-        }
-      }
-    }
-
-    if (geno_file.bad())
-      return std::cerr << "Error: failed to reading from genotype file\n", EXIT_FAILURE;
-  }
-  //========== END Load genotypes ==========//
-
+  std::vector<savvy::compressed_vector<std::int8_t>> genotypes;
+  if (!load_variant_id_genotypes(args.geno_path(), variant_ids, genotypes))
+    return std::cerr << "Error: failed to load genotypes\n", EXIT_FAILURE;
+  //========== END Load input ==========//
 
   //========== Run clumping ==========//
   std::vector<std::int8_t> dense_geno;
@@ -494,6 +283,12 @@ int main(int argc, char** argv)
   //========== END Run clumping ==========//
 
   //========== Write output ==========//
+  shrinkwrap::bgzf::ostream output_file(args.output_path());
+  if (!output_file)
+    return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
+
+  output_file << input_results.header_line() << "\tclump_group" << std::endl;
+
   for (auto it = records.begin(); it != records.end() && output_file; ++it)
   {
     if (args.write_all() || it->tophit())
