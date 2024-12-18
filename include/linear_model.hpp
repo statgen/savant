@@ -543,5 +543,231 @@ static std::ostream& operator<<(std::ostream& os, const typename linear_model::s
   return os;
 }
 
+class residualizer_pinv
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  cov_t x_;
+  cov_t m_;
+public:
+  residualizer_pinv() {}
+  residualizer_pinv(const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    x_ = x_orig;
+    /*auto it = std::find_if(x_orig.begin(), x_orig.end(), [](auto&x) { return std::isnan(x); });
+    auto idx = it - x_orig.begin();
+    cov_t c = xt::eval(dot(transpose(x_), x_));
+    std::cerr << c << std::endl;
+    std::cerr << xt::sum(x_orig) << std::endl;
+    m_ = xt::eval(dot(pinv(c), transpose(x_)));*/
+    cov_t c = dot(transpose(x_), x_);
+    cov_t c_i;
+    try
+    {
+      c_i = inv(c);
+    }
+    catch (...)
+    {
+      c_i = pinv(c);
+    }
+
+    m_ = xt::eval(dot(c_i, transpose(x_)));
+  }
+
+  std::size_t n_predictors() const { return x_.shape()[1] - 1; } // excludes intercept term.
+  std::size_t n_samples() const { return x_.shape()[0]; }
+
+  template <typename T>
+  void print_model_fit(std::ostream& ofs, const std::vector<T>& v_std) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto v = xt::adapt(v_std, {v_std.size()});
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+
+    //    double sse = xt::eval(xt::sum(residuals * residuals))();
+    //    double sst = xt::eval(xt::sum(xt::square(v - xt::mean(v))))();
+    double sse = xt::eval(xt::linalg::dot(residuals, residuals))();
+    double sst = xt::eval(xt::variance(v))() * v.size();
+    double r2 = 1. - sse / sst;
+    std::size_t n = v.size();
+    std::size_t k = n_predictors();
+    double r2_adj = 1. - (sse / (n - k - 1.)) / (sst / (n - 1.));
+
+    ofs << r2 << "\t" << r2_adj;
+    for (auto it = pbetas.begin(); it != pbetas.end(); ++it)
+      ofs << "\t" << *it;
+    ofs << "\n";
+  }
+
+  template <typename T>
+  res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const std::vector<T>& v_std, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto v = xt::adapt(v_std, {v_std.size()});
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return std::vector<scalar_type> (residuals.begin(), residuals.end());
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const savvy::compressed_vector<T>& v, bool invnorm = false) const // TODO: this method needs to be tested.
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    if (v.size() != m_.shape()[1]) throw std::runtime_error("length mismatch");
+
+    xt::xtensor<scalar_type, 1> pbetas = xt::zeros<scalar_type>({m_.shape()[0]});
+    for (auto it = v.begin(); it != v.end(); ++it)
+    {
+      for (std::size_t j = 0; j < pbetas.size(); ++j)
+        pbetas[j] += (*it) * m_(j, it.offset()); // TODO: consider making m_ column-major
+    }
+
+    xt::xtensor<scalar_type, 1> pred = dot(x_, pbetas);
+    std::vector<scalar_type> residuals(v.size());
+    for (auto it = v.begin(); it != v.end(); ++it)
+      residuals[it.offset()] = *it;
+
+    for (std::size_t i = 0; i < pred.size(); ++i)
+      residuals[i] -= pred[i];
+
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+};
+
+class residualizer_inv
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  cov_t x_;
+  cov_t m_;
+public:
+  residualizer_inv() {}
+  residualizer_inv(const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    x_ = x_orig;
+
+    m_ = xt::eval(dot(inv(dot(transpose(x_), x_)), transpose(x_)));
+  }
+
+  std::size_t n_variables() const { return x_.shape()[1]; }
+  std::size_t n_samples() const { return x_.shape()[0]; }
+
+  template <typename T>
+  res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const std::vector<T>& v_std, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    auto v = xt::adapt(v_std, {v_std.size()});
+    auto pbetas = dot(m_, v);
+    res_t residuals = v - dot(x_, pbetas);
+    if (invnorm)
+      inverse_normalize(residuals);
+    return std::vector<scalar_type> (residuals.begin(), residuals.end());
+  }
+
+};
+
+class residualizer_qr
+{
+public:
+  typedef double scalar_type;
+  typedef xt::xtensor<scalar_type, 1> res_t;
+  typedef xt::xtensor<scalar_type, 2> cov_t;
+private:
+  cov_t q_;
+public:
+  residualizer_qr() {}
+  residualizer_qr(const cov_t& x_orig)
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+    //cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
+    cov_t r;
+    std::tie(q_, r) = qr(x_orig);
+  }
+
+  std::size_t n_variables() const { return q_.shape()[1]; }
+  std::size_t n_samples() const { return q_.shape()[0]; }
+
+  template <typename T>
+  res_t operator()(const xt::xtensor<T, 1>& v, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    res_t residuals = v - dot(dot(v, q_), transpose(q_));
+    if (invnorm)
+      inverse_normalize(residuals);
+    return residuals;
+  }
+
+  template <typename T>
+  std::vector<scalar_type> operator()(const std::vector<T>& v_std, bool invnorm = false) const
+  {
+    using namespace xt;
+    using namespace xt::linalg;
+
+    auto v = xt::adapt(v_std, {v_std.size()});
+
+    res_t residuals = v - dot(dot(v, q_), transpose(q_));
+    if (invnorm)
+      inverse_normalize(residuals);
+    return std::vector<scalar_type> (residuals.begin(), residuals.end());
+  }
+
+};
+
+typedef residualizer_pinv residualizer;
+
 
 #endif //SAVANT_LINEAR_MODEL_HPP
