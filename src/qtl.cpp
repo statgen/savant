@@ -528,39 +528,6 @@ int cis_qtl_main(int argc, char** argv)
   return EXIT_SUCCESS;
 }
 
-template <typename T>
-std::vector<std::size_t> remove_missing(std::vector<T>& vec)
-{
-  std::vector<std::size_t> subset_mask(vec.size());
-
-  std::size_t dest = 0;
-  for (std::size_t i = 0; i < vec.size(); ++i)
-  {
-    if (std::isnan(vec[i]))
-    {
-      subset_mask[i] = std::size_t(-1);
-    }
-    else
-    {
-      vec[dest] = vec[i];
-      subset_mask[i] = dest++;
-    }
-  }
-  vec.resize(dest);
-
-  return subset_mask;
-}
-
-template <typename T>
-void mean_center(std::vector<T>& vec)
-{
-  T s = std::accumulate(vec.begin(), vec.end(), T());
-  T m = s / vec.size();
-
-  for (auto it = vec.begin(); it != vec.end(); ++it)
-    *it = *it - m;
-}
-
 class output_wrapper
 {
 private:
@@ -1083,7 +1050,7 @@ int trans_qtl_main(int argc, char** argv)
   for (std::size_t i = 0; i < phenos.size(); ++i)
   {
     keep_samples.resize(0);
-    subset_non_missing_map[i] = remove_missing(phenos[i]);
+    subset_non_missing_map[i] = utility::remove_missing(phenos[i]);
     for (std::size_t j = 0; j < subset_non_missing_map[i].size(); ++j)
     {
       if (subset_non_missing_map[i][j] <= j)

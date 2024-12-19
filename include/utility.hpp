@@ -14,6 +14,7 @@
 #include <string>
 #include <cstring>
 #include <algorithm>
+#include <numeric>
 
 struct utility
 {
@@ -137,6 +138,39 @@ struct utility
     }
 
     return ret;
+  }
+
+  template <typename T>
+  static std::vector<std::size_t> remove_missing(std::vector<T>& vec)
+  {
+    std::vector<std::size_t> subset_mask(vec.size());
+
+    std::size_t dest = 0;
+    for (std::size_t i = 0; i < vec.size(); ++i)
+    {
+      if (std::isnan(vec[i]))
+      {
+        subset_mask[i] = std::size_t(-1);
+      }
+      else
+      {
+        vec[dest] = vec[i];
+        subset_mask[i] = dest++;
+      }
+    }
+    vec.resize(dest);
+
+    return subset_mask;
+  }
+
+  template <typename T>
+  static void mean_center(std::vector<T>& vec)
+  {
+    T s = std::accumulate(vec.begin(), vec.end(), T());
+    T m = s / vec.size();
+
+    for (auto it = vec.begin(); it != vec.end(); ++it)
+      *it = *it - m;
   }
 };
 
