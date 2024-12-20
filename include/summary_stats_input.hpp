@@ -188,7 +188,7 @@ public:
 };
 
 template <typename GenoT>
-bool load_variant_id_genotypes(const std::string& geno_file_path, const std::vector<variant_id_t>& variant_ids,  std::vector<savvy::compressed_vector<GenoT>>& genotypes)
+bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno_file_path, const std::vector<variant_id_t>& variant_ids,  std::vector<savvy::compressed_vector<GenoT>>& genotypes)
 {
   //========== Determine most efficient regions for querying genotypes ==========//
   savvy::s1r::reader index_file(geno_file_path);
@@ -224,7 +224,6 @@ bool load_variant_id_genotypes(const std::string& geno_file_path, const std::vec
   genotypes.clear();
   genotypes.resize(variant_ids.size());
 
-  savvy::reader geno_file(geno_file_path);
   if (!geno_file)
     return std::cerr << "Error: failed to open genotype file\n", false;
 
@@ -261,6 +260,13 @@ bool load_variant_id_genotypes(const std::string& geno_file_path, const std::vec
   //========== END Load genotypes ==========//
 
   return true;
+}
+
+template <typename GenoT>
+bool load_variant_id_genotypes(const std::string& geno_file_path, const std::vector<variant_id_t>& variant_ids,  std::vector<savvy::compressed_vector<GenoT>>& genotypes)
+{
+  savvy::reader geno_file(geno_file_path);
+  return load_variant_id_genotypes(geno_file, geno_file_path, variant_ids, genotypes);
 }
 
 #endif // SAVANT_SUMMARY_STATS_INPUT_HPP

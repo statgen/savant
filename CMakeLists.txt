@@ -20,8 +20,12 @@ target_link_libraries(savant savvy xtensor-blas ${OMP_LIB} ${CMAKE_THREAD_LIBS_I
 add_executable(savant-clump src/ld_clump.cpp)
 target_compile_definitions(savant-clump PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
 target_include_directories(savant-clump PRIVATE include)
-target_link_libraries(savant-clump savvy ${OMP_LIB} ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(savant-clump savvy)
 
+add_executable(savant-condition src/condition.cpp src/inv_norm.cpp)
+target_compile_definitions(savant-condition PRIVATE -DSAVANT_VERSION="${PROJECT_VERSION}")
+target_include_directories(savant-condition PRIVATE include ${Boost_INCLUDE_DIRS})
+target_link_libraries(savant-condition savvy xtensor-blas)
 
 
 install(TARGETS savant RUNTIME DESTINATION bin)

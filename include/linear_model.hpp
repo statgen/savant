@@ -521,6 +521,25 @@ public:
 
     return ret;
   }
+
+  template <typename T1, typename T2>
+  static void residualize(std::vector<T1>& y, const linear_model::variable_stats<scalar_type>& y_stats,  const std::vector<T2>& x, const linear_model::variable_stats<scalar_type>& x_stats)
+  {
+    assert(x.size() == y.size());
+    const std::size_t n = x.size();
+    const scalar_type s_x = x_stats.sum();
+    const scalar_type s_xx = x_stats.sum_squared();
+    const scalar_type s_y = y_stats.sum();
+    const scalar_type s_yy = y_stats.sum_squared();
+    const scalar_type s_xy = std::inner_product(x.begin(), x.end(), y.begin(), scalar_type());
+
+    const scalar_type one = 1;
+    const scalar_type beta       = (n * s_xy - s_x * s_y) / (n * s_xx - s_x * s_x);
+    const scalar_type alpha = (one/n) * s_y - beta * (one/n) * s_x;
+
+    for (std::size_t i = 0; i < y.size(); ++i)
+      y[i] = y[i] - (x[i] * beta + alpha);
+  }
 private:
   template <typename T>
   static T square(const T& v) { return v * v; }
