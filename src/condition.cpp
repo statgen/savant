@@ -282,17 +282,12 @@ int main(int argc, char** argv)
         break;
       }
 
-      linear_model::variable_stats<scalar_type> pheno_resid_summary(pheno_resid);
       linear_model::variable_stats<scalar_type> top_geno_summary(top_geno);
-
-      linear_model::residualize(pheno_resid, pheno_resid_summary, top_geno, top_geno_summary);
+      linear_model::residualize(pheno_resid, linear_model::variable_stats<scalar_type>(pheno_resid), top_geno, top_geno_summary);
       pheno_resid_invnorm = pheno_resid;
-      linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary = pheno_resid_summary = linear_model::variable_stats<scalar_type>(pheno_resid);
       if (args.invnorm())
-      {
         inverse_normalize(pheno_resid_invnorm);
-        pheno_resid_invnorm_summary = linear_model::variable_stats<scalar_type>(pheno_resid_invnorm);
-      }
+      linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
       //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
 
       for (std::size_t i = 0; i < it->second.size(); ++i)
