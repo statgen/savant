@@ -261,7 +261,7 @@ int main(int argc, char** argv)
       {
         if (it->second[i]->score() < min_pvalue)
         {
-          min_pvalue = it->second[i]->pvalue();
+          min_pvalue = it->second[i]->score();
           min_idx = i;
         }
       }
