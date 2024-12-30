@@ -116,7 +116,7 @@ public:
       return false;
     }
 
-    if (pval_threshold_ > 1. || pval_threshold_ < 0.)
+    if (pval_threshold_ >= 1. || pval_threshold_ <= 0.)
       return std::cerr << "Error: must set valid significance threshold for --max-pvalue\n", false;
 
     return true;
@@ -126,6 +126,42 @@ public:
 typedef double scalar_type;
 //typedef savvy::compressed_vector<std::int8_t> vec_t;
 
+
+
+
+std::ostream& write_header(std::ostream& ofs)
+{
+  ofs << "chrom\tpos\tref\talt\tid\taf\tac\tns\t" << linear_model::stats_t::header_column_names() << std::endl;
+  return ofs; 
+}
+
+std::ostream& write_conditioned(std::ostream& ofs, const variant_id_t& var_id, const std::string& str_id, float af, std::int64_t ac, std::int64_t ns, const linear_model::stats_t& stats, std::string pheno_id, std::size_t rank)
+{
+  std::cerr << "HERE" << std::endl;
+  ofs << var_id.chrom
+    << "\t" << var_id.pos
+    << "\t" << var_id.ref
+    << "\t" << var_id.alt
+    << "\t" << str_id
+    << "\t" << af
+    << "\t" << ac
+    << "\t" << ns
+    << "\t" << stats;
+
+  if (pheno_id.size())
+    ofs << "\t" << pheno_id;
+
+  ofs << "\t" << rank << "\n";
+
+  return ofs;
+}
+
+class ac_an_t
+{
+public:
+  scalar_type ac = 0;
+  std::size_t an = 0;
+};
 
 int main(int argc, char** argv)
 {
@@ -187,13 +223,29 @@ int main(int argc, char** argv)
   std::vector<savvy::compressed_vector<scalar_type>> genotypes;
   if (!load_variant_id_genotypes(geno_file, args.geno_path(), variant_ids, genotypes))
     return std::cerr << "Error: failed to load genotypes\n", EXIT_FAILURE;
-
-  for (auto it = genotypes.begin(); it != genotypes.end(); ++it)
-    savvy::stride_reduce(*it, it->size() / sample_intersection.size(), savvy::plus_eov<scalar_type>());
+  
+  std::vector<std::size_t> genotype_strides(genotypes.size());
+  for (std::size_t i = 0; i < genotypes.size(); ++i)
+  {
+    genotype_strides[i] = genotypes[i].size() / sample_intersection.size();
+    savvy::stride_reduce(genotypes[i], genotype_strides[i], savvy::plus_eov<scalar_type>());
+  }
   //========== END Load results input ==========//
+
+  //========== Open output file  ==========//
+  shrinkwrap::bgzf::ostream output_file(args.output_path());
+  if (!output_file)
+    return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
+
+  if (!write_header(output_file))
+    return std::cerr << "Error: writing to output file failed\n", EXIT_FAILURE;
+  //========== END Open output file  ==========//
 
   //========== Run conditional analyses ==========//
   std::vector<std::vector<scalar_type>> dense_genos;
+  std::vector<std::uint8_t> dense_genos_mask;
+  std::vector<double> dense_genos_ac;
+
   for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
   {
     auto pf = pheno_name_to_idx.find(it->first);
@@ -212,17 +264,31 @@ int main(int argc, char** argv)
     }
 
     dense_genos.resize(it->second.size());
+    dense_genos_mask.resize(it->second.size());
+    dense_genos_ac.resize(it->second.size());
+    
     for (std::size_t i = 0; i < dense_genos.size(); ++i)
     {
+      dense_genos_mask[i] = 0;
       dense_genos[i].resize(phenos[pheno_idx].size());
+      dense_genos_ac[i] = 0;
       const auto& g = genotypes[it->second[i]->genotype_index()];
+      std::size_t stride = genotype_strides[it->second[i]->genotype_index()];
+
       for (auto gt = g.begin(); gt != g.end(); ++gt)
       {
         if (missing_map[gt.offset()] < dense_genos[i].size())
+        {
           dense_genos[i][missing_map[gt.offset()]] = *gt;
+          dense_genos_ac[i] += *gt;
+        }
+        /*else
+        {
+          dense_genos_counts[i].an -= stride;
+        }*/
       }
 
-      it->second[i]->set_genotype_index(i); // switch to using dense_geno index instead of genotypes index.
+      //it->second[i]->set_genotype_index(i); // switch to using dense_geno index instead of genotypes index.
     }
     //~~~~~~~~~~ END subset pheno and geno vector ~~~~~~~~~~//
 
@@ -243,18 +309,21 @@ int main(int argc, char** argv)
     }
     //~~~~~~~~~~ END Regress out covariates ~~~~~~~~~~//
 
-    for (std::size_t i = 0; i < it->second.size(); ++i)
+    /*for (std::size_t i = 0; i < it->second.size(); ++i)
     {
       it->second[i]->set_score(it->second[i]->pvalue());
       if (it->second[i]->pvalue() <= args.pval_threshold())
         it->second[i]->set_group(1);
-    }
-
+    }*/
+    std::cerr << __LINE__ << std::endl;
     assert(it->second.size() > 0);
-
-    for (std::int32_t group = 2; it->second.size() > 0; ++group)
+    const std::size_t ns = phenos[pheno_idx].size(); 
+    std::size_t max_idx = std::size_t(-1);
+    linear_model::stats_t max_assoc;
+    for (std::int32_t group = 1; max_assoc.pvalue <= args.pval_threshold(); ++group)
     {
-      double min_pvalue = 2.;
+      std::cerr << group << std::endl;
+      /*double min_pvalue = 2.;
       std::size_t min_idx = std::size_t(-1);
 
       for (std::size_t i = 0; i < it->second.size(); ++i)
@@ -289,31 +358,41 @@ int main(int argc, char** argv)
         inverse_normalize(pheno_resid_invnorm);
       linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
       //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
+      */
 
-      for (std::size_t i = 0; i < it->second.size(); ++i)
+      max_assoc.pvalue = 2.;
+      scalar_type max_abs_t = -1.;
+      linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
+      for (std::size_t i = 0; i < dense_genos.size(); ++i)
       {
-        if (i != min_idx)
+        if (!dense_genos_mask[i])
         {
-          //double r2 = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
-          std::size_t g_idx = it->second[i]->genotype_index();
-          linear_model::residualize(dense_genos[g_idx], dense_geno_stats[g_idx], top_geno, top_geno_summary);
-          dense_geno_stats[g_idx] = linear_model::variable_stats<scalar_type>(dense_genos[g_idx]);
+          //std::size_t g_idx = it->second[i]->genotype_index();
+          //linear_model::residualize(dense_genos[g_idx], dense_geno_stats[g_idx], top_geno, top_geno_summary);
+          //dense_geno_stats[g_idx] = linear_model::variable_stats<scalar_type>(dense_genos[g_idx]);
 
           auto s = linear_model::ols(pheno_resid_invnorm.size(),
-            std::inner_product(dense_genos[g_idx].begin(), dense_genos[g_idx].end(), pheno_resid_invnorm.begin(), scalar_type()),
-            dense_geno_stats[g_idx],
+            std::inner_product(dense_genos[i].begin(), dense_genos[i].end(), pheno_resid_invnorm.begin(), scalar_type()),
+            dense_geno_stats[i],
             pheno_resid_invnorm_summary,
             pheno_resid_invnorm.size() - dof_subtrahend);
 
-          if (s.pvalue <= args.pval_threshold())
+          if (std::abs(s.t) > max_abs_t)
+          {
+            max_assoc = s;
+            max_abs_t = std::abs(s.t);
+            max_idx = i;
+          }
+
+          /*if (s.pvalue <= args.pval_threshold())
           {
             it->second[i]->set_group(group);
-            it->second[i]->set_score(s.pvalue);
-          }
+            it->second[i]->set_score(s.t);
+          }*/  
         }
       }
 
-      // Remove records in previous clump group
+      /*// Remove records in previous clump group
       std::size_t dest = 0;
       for (std::size_t i = 0; i < it->second.size(); ++i)
       {
@@ -324,13 +403,66 @@ int main(int argc, char** argv)
           ++dest;
         }
       }
-      it->second.resize(dest);
+      it->second.resize(dest);*/
+
+      if (max_assoc.pvalue <= args.pval_threshold())
+      {
+        /*double max_tstat = -1.;
+        //std::size_t min_idx = std::size_t(-1);
+
+        for (std::size_t i = 0; i < it->second.size(); ++i)
+        {
+          if (std::abs(it->second[i]->score()) > max_tstat)
+          {
+            max_tstat = it->second[i]->score();
+            max_idx = i;
+          }
+        }*/
+
+        assert(max_idx < it->second.size());
+        write_conditioned(output_file, 
+          variant_ids[it->second[max_idx]->genotype_index()],
+          it->second[max_idx]->string_variant_id(),
+          dense_genos_ac[max_idx] / (genotype_strides[it->second[max_idx]->genotype_index()] * ns),
+          dense_genos_ac[max_idx],
+          ns,
+          max_assoc,
+          it->first,
+          group);
+        
+        dense_genos_mask[max_idx] = 1; // do not test this variant anymore
+
+        assert(max_idx < dense_genos.size());
+        auto& top_geno = dense_genos[max_idx];
+
+        //~~~~~~~~~~ regress out top genotype ~~~~~~~~~~//
+        ++dof_subtrahend;
+        if (dof_subtrahend >= pheno_resid_invnorm.size())
+        {
+          std::cerr << "Warning: ran out of degrees of freedom for " << it->first << std::endl;
+          break;
+        }
+
+        linear_model::variable_stats<scalar_type> top_geno_summary(top_geno);
+        linear_model::residualize(pheno_resid, linear_model::variable_stats<scalar_type>(pheno_resid), top_geno, top_geno_summary);
+        pheno_resid_invnorm = pheno_resid;
+        if (args.invnorm())
+          inverse_normalize(pheno_resid_invnorm);
+
+        for (std::size_t i = 0; i < it->second.size(); ++i)
+        {
+          //std::size_t g_idx = it->second[i]->genotype_index();
+          linear_model::residualize(dense_genos[i], dense_geno_stats[i], top_geno, top_geno_summary);
+          dense_geno_stats[i] = linear_model::variable_stats<scalar_type>(dense_genos[i]);
+        }
+        //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
+      }
     }
   }
   //========== END Run clumping ==========//
 
   //========== Write output ==========//
-  shrinkwrap::bgzf::ostream output_file(args.output_path());
+  /*shrinkwrap::bgzf::ostream output_file(args.output_path());
   if (!output_file)
     return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
 
@@ -340,9 +472,9 @@ int main(int argc, char** argv)
   {
     if (args.write_all() || it->tophit())
     {
-      output_file << it->serialized_line() << "\t" << it->group()  << "\t" << it->score() << "\n";
+      output_file << it->serialized_line() << "\t" << it->group()  << "\t" << linear_model::calculate_pvalue(it->score(), - (2 + covariate_residualizer.n_predictors() + std::max(it->group(), 1) - 1)) << "\n";
     }
-  }
+  }*/
 
   if (!output_file)
     return std::cerr << "Error: failed to write output records\n", EXIT_FAILURE;

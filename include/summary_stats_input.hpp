@@ -80,6 +80,7 @@ public:
   private:
     std::string line_;
     variant_id_t variant_id_;
+    std::string string_variant_id_;
     double pvalue_ = 2.;
     std::string pheno_id_;
     std::int32_t clump_group_ = 0;
@@ -97,6 +98,7 @@ public:
     void set_tophit(bool v = true) { tophit_ = v; }
     bool tophit() const { return tophit_; }
     const variant_id_t& variant_id() const { return variant_id_; }
+    const std::string& string_variant_id() const { return string_variant_id_; }
     void set_genotype_index(std::size_t idx) { genotype_idx_ = idx; }
     std::size_t genotype_index() const {  return genotype_idx_; }
     const std::string& serialized_line() const { return line_; }
@@ -131,6 +133,8 @@ public:
           self.variant_id_.ref = self.line_.substr(start_pos, pos - start_pos);
         else if (i == 3)
           self.variant_id_.alt = self.line_.substr(start_pos, pos - start_pos);
+        else if (i == 4)
+          self.string_variant_id_ = self.line_.substr(start_pos, pos - start_pos);
         else if (i == 8)
           self.pvalue_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
         else if (i == 13)
