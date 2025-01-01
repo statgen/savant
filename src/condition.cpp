@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <list>
 #include <numeric>
+#include <chrono>
 
 #include "getopt_wrapper.hpp"
 #include "summary_stats_input.hpp"
@@ -30,7 +31,7 @@ private:
   double pval_threshold_ = 2.;
   std::uint32_t seed_ = 7;
   bool invnorm_ = false;
-  bool write_all_ = false;
+  //bool write_all_ = false;
   bool help_ = false;
   bool version_ = false;
 public:
@@ -41,7 +42,6 @@ public:
       {"inv-norm", "", '\x01', "Inverse normalize response"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"max-pvalue", "<real>", 'p', "Max p-value to clump"},
-      {"write-all", "", 'a', "Write all records to output instead of only the most significant association from each LD group"},
       {"version", "", 'v', "Print version"}})
   {
   }
@@ -56,7 +56,7 @@ public:
   std::uint32_t seed() const { return seed_; }
   bool help_is_set() const { return help_; }
   bool version_is_set() const { return version_; }
-  bool write_all() const { return write_all_; }
+  //bool write_all() const { return write_all_; }
   bool invnorm() const { return invnorm_; }
 
   bool parse(int argc, char** argv)
@@ -73,9 +73,6 @@ public:
         {
           invnorm_ = true;
         }
-        break;
-      case 'a':
-        write_all_ = true;
         break;
       case 'c':
         cov_path_ = optarg ? optarg : "";
@@ -129,15 +126,17 @@ typedef double scalar_type;
 
 
 
-std::ostream& write_header(std::ostream& ofs)
+std::ostream& write_header(std::ostream& ofs, bool write_pheno_id)
 {
-  ofs << "chrom\tpos\tref\talt\tid\taf\tac\tns\t" << linear_model::stats_t::header_column_names() << std::endl;
+  ofs << "chrom\tpos\tref\talt\tid\taf\tac\tns\t" << linear_model::stats_t::header_column_names();
+  if (write_pheno_id)
+    ofs << "\tpheno_id";
+  ofs << "\trank" << std::endl;
   return ofs; 
 }
 
-std::ostream& write_conditioned(std::ostream& ofs, const variant_id_t& var_id, const std::string& str_id, float af, std::int64_t ac, std::int64_t ns, const linear_model::stats_t& stats, std::string pheno_id, std::size_t rank)
+std::ostream& write_conditioned(std::ostream& ofs, const variant_id_t& var_id, const std::string& str_id, float af, std::int64_t ac, std::int64_t ns, const linear_model::stats_t& stats, const std::string& pheno_id, std::size_t rank)
 {
-  std::cerr << "HERE" << std::endl;
   ofs << var_id.chrom
     << "\t" << var_id.pos
     << "\t" << var_id.ref
@@ -155,13 +154,6 @@ std::ostream& write_conditioned(std::ostream& ofs, const variant_id_t& var_id, c
 
   return ofs;
 }
-
-class ac_an_t
-{
-public:
-  scalar_type ac = 0;
-  std::size_t an = 0;
-};
 
 int main(int argc, char** argv)
 {
@@ -184,7 +176,11 @@ int main(int argc, char** argv)
     return EXIT_SUCCESS;
   }
 
+  typedef std::chrono::high_resolution_clock hrc;
+
   //========== Load phenotypes and covariates ==========//
+  std::cerr << "Loading phenotypes and covariates ... " << std::flush;
+  auto t = hrc::now();
   savvy::reader geno_file(args.geno_path());
   if (!geno_file)
     return std::cerr << "Could not open geno file\n", EXIT_FAILURE;
@@ -205,9 +201,13 @@ int main(int argc, char** argv)
     cov_mat = xt::ones<scalar_type, std::vector<std::size_t>>({sample_intersection.size(), 1}); //TODO: test
   else if (!parse_covariates_file(args.cov_path(), sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
+  std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
   //========== END Load phenotypes and covariates ==========//
 
   //========== Load results input ==========//
+  std::cerr << "Loading summary statistics input ... " << std::flush;
+  t = hrc::now();
+
   results_file input_results(args.results_path());
   if (!input_results)
     return std::cerr << "Error: opening association results input file failed\n", EXIT_FAILURE;
@@ -215,10 +215,14 @@ int main(int argc, char** argv)
   std::list<results_file::record> records;
   std::unordered_map<std::string, std::vector<results_file::record*>> pheno_results;
   std::vector<variant_id_t> variant_ids;
-  results_file::read(input_results, records, pheno_results, variant_ids, args.pval_threshold(), args.write_all());
+  results_file::read(input_results, records, pheno_results, variant_ids, 2., true);
 
   if (input_results.bad())
     return std::cerr << "Error: failed loading association results input file\n", EXIT_FAILURE;
+  std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
+
+  std::cerr << "Loading genotypes ... " << std::flush;
+  t = hrc::now();
 
   std::vector<savvy::compressed_vector<scalar_type>> genotypes;
   if (!load_variant_id_genotypes(geno_file, args.geno_path(), variant_ids, genotypes))
@@ -230,6 +234,7 @@ int main(int argc, char** argv)
     genotype_strides[i] = genotypes[i].size() / sample_intersection.size();
     savvy::stride_reduce(genotypes[i], genotype_strides[i], savvy::plus_eov<scalar_type>());
   }
+  std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
   //========== END Load results input ==========//
 
   //========== Open output file  ==========//
@@ -237,7 +242,8 @@ int main(int argc, char** argv)
   if (!output_file)
     return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
 
-  if (!write_header(output_file))
+  const std::string& l = input_results.header_line();
+  if (!write_header(output_file, l.size() >= 8 && l.substr(l.size() - 8) == "pheno_id"))
     return std::cerr << "Error: writing to output file failed\n", EXIT_FAILURE;
   //========== END Open output file  ==========//
 
@@ -245,14 +251,22 @@ int main(int argc, char** argv)
   std::vector<std::vector<scalar_type>> dense_genos;
   std::vector<std::uint8_t> dense_genos_mask;
   std::vector<double> dense_genos_ac;
-
+  std::size_t progress = 0;
+  std::int64_t t_sub, t_pheno_res_cov, t_geno_res_cov, t_res, t_ols, t_write;
   for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
   {
+    if (progress % 10 == 0)
+    {
+      t_sub = t_pheno_res_cov = t_geno_res_cov = t_res = t_ols = t_write = 0;
+      std::cerr << "Processing phenotypes " << (progress + 1) << "-" <<  std::min(pheno_results.size(), progress + 10) << " ... " << std::flush;
+      //t = hrc::now();
+    }
     auto pf = pheno_name_to_idx.find(it->first);
     if (pf == pheno_name_to_idx.end())
       return std::cerr << "Error: results file contains phenotype not in phenotype file\n", EXIT_FAILURE;
 
     //~~~~~~~~~~ subset pheno and geno vector ~~~~~~~~~~//
+    t = hrc::now();
     std::size_t pheno_idx = pf->second;
     assert(pheno_idx < phenos.size());
     std::vector<std::size_t> missing_map = utility::remove_missing(phenos[pheno_idx]);
@@ -290,23 +304,27 @@ int main(int argc, char** argv)
 
       //it->second[i]->set_genotype_index(i); // switch to using dense_geno index instead of genotypes index.
     }
+    t_sub += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
     //~~~~~~~~~~ END subset pheno and geno vector ~~~~~~~~~~//
 
     //~~~~~~~~~~ Regress out covariates ~~~~~~~~~~//
+    t = hrc::now();
     residualizer covariate_residualizer(xt::view(cov_mat, xt::keep(keep_samples), xt::all()));
     std::vector<scalar_type> pheno_resid = covariate_residualizer(phenos[pheno_idx], false);
     std::vector<scalar_type> pheno_resid_invnorm = pheno_resid;
     if (args.invnorm())
       inverse_normalize(pheno_resid_invnorm);
+    t_pheno_res_cov += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
 
     std::size_t dof_subtrahend = covariate_residualizer.n_predictors() + 2;
-
+    t = hrc::now();
     std::vector<linear_model::variable_stats<scalar_type>> dense_geno_stats(dense_genos.size());
     for (std::size_t i = 0; i < dense_genos.size(); ++i)
     {
       dense_genos[i] = covariate_residualizer(dense_genos[i], false);
       dense_geno_stats[i] =  linear_model::variable_stats<scalar_type>(dense_genos[i]);
     }
+    t_geno_res_cov += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
     //~~~~~~~~~~ END Regress out covariates ~~~~~~~~~~//
 
     /*for (std::size_t i = 0; i < it->second.size(); ++i)
@@ -315,14 +333,12 @@ int main(int argc, char** argv)
       if (it->second[i]->pvalue() <= args.pval_threshold())
         it->second[i]->set_group(1);
     }*/
-    std::cerr << __LINE__ << std::endl;
     assert(it->second.size() > 0);
     const std::size_t ns = phenos[pheno_idx].size(); 
     std::size_t max_idx = std::size_t(-1);
     linear_model::stats_t max_assoc;
     for (std::int32_t group = 1; max_assoc.pvalue <= args.pval_threshold(); ++group)
     {
-      std::cerr << group << std::endl;
       /*double min_pvalue = 2.;
       std::size_t min_idx = std::size_t(-1);
 
@@ -359,7 +375,7 @@ int main(int argc, char** argv)
       linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
       //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
       */
-
+      t = hrc::now();
       max_assoc.pvalue = 2.;
       scalar_type max_abs_t = -1.;
       linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
@@ -391,6 +407,7 @@ int main(int argc, char** argv)
           }*/  
         }
       }
+      t_ols += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
 
       /*// Remove records in previous clump group
       std::size_t dest = 0;
@@ -418,9 +435,9 @@ int main(int argc, char** argv)
             max_idx = i;
           }
         }*/
-
+        t = hrc::now();
         assert(max_idx < it->second.size());
-        write_conditioned(output_file, 
+        if (!write_conditioned(output_file, 
           variant_ids[it->second[max_idx]->genotype_index()],
           it->second[max_idx]->string_variant_id(),
           dense_genos_ac[max_idx] / (genotype_strides[it->second[max_idx]->genotype_index()] * ns),
@@ -428,7 +445,11 @@ int main(int argc, char** argv)
           ns,
           max_assoc,
           it->first,
-          group);
+          group))
+        {
+          return std::cerr << "Error: writint output record failed\n", EXIT_FAILURE;
+        }
+        t_write += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
         
         dense_genos_mask[max_idx] = 1; // do not test this variant anymore
 
@@ -436,6 +457,7 @@ int main(int argc, char** argv)
         auto& top_geno = dense_genos[max_idx];
 
         //~~~~~~~~~~ regress out top genotype ~~~~~~~~~~//
+        t = hrc::now();
         ++dof_subtrahend;
         if (dof_subtrahend >= pheno_resid_invnorm.size())
         {
@@ -455,9 +477,15 @@ int main(int argc, char** argv)
           linear_model::residualize(dense_genos[i], dense_geno_stats[i], top_geno, top_geno_summary);
           dense_geno_stats[i] = linear_model::variable_stats<scalar_type>(dense_genos[i]);
         }
+        t_res += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
         //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
       }
     }
+
+    
+    if (++progress % 10 == 0 || progress == pheno_results.size())
+      std::cerr << t_sub << "," << t_pheno_res_cov << "," << t_geno_res_cov << "," << t_res << "," << t_ols << "," << t_write << std::endl;
+      //std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
   }
   //========== END Run clumping ==========//
 
