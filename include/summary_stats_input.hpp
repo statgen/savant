@@ -143,6 +143,9 @@ public:
         start_pos = pos + 1;
       }
 
+      if (expect_pheno_column && self.pheno_id_.empty())
+        return std::cerr << "Empty pheno_id: " << self.line_ << std::endl, false;
+
       return true;
     }
   };

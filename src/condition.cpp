@@ -30,6 +30,7 @@ private:
   std::unique_ptr<savvy::genomic_region> region_;
   double pval_threshold_ = 2.;
   std::uint32_t seed_ = 7;
+  int progress_unit_ = 100;
   bool invnorm_ = false;
   //bool write_all_ = false;
   bool help_ = false;
@@ -42,6 +43,7 @@ public:
       {"inv-norm", "", '\x01', "Inverse normalize response"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"max-pvalue", "<real>", 'p', "Max p-value to clump"},
+      {"progress", "<integer>", '\x02', "Number of phenotypes to group for progress logging (default: 100; disable: 0)"},
       {"version", "", 'v', "Print version"}})
   {
   }
@@ -54,6 +56,7 @@ public:
   const std::string& results_path() const { return results_path_; }
   double pval_threshold() const { return pval_threshold_; }
   std::uint32_t seed() const { return seed_; }
+  int progress_unit() const { return progress_unit_; }
   bool help_is_set() const { return help_; }
   bool version_is_set() const { return version_; }
   //bool write_all() const { return write_all_; }
@@ -72,6 +75,12 @@ public:
         if (std::string("inv-norm") == long_options_[long_index].name)
         {
           invnorm_ = true;
+        }
+        break;
+      case '\x02':
+        if (std::string("progress") == long_options_[long_index].name)
+        {
+          progress_unit_ = std::atol(optarg ? optarg : "");
         }
         break;
       case 'c':
@@ -252,21 +261,19 @@ int main(int argc, char** argv)
   std::vector<std::uint8_t> dense_genos_mask;
   std::vector<double> dense_genos_ac;
   std::size_t progress = 0;
-  std::int64_t t_sub, t_pheno_res_cov, t_geno_res_cov, t_res, t_ols, t_write;
+  //std::int64_t t_sub, t_pheno_res_cov, t_geno_res_cov, t_res, t_ols, t_write;
   for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
   {
-    if (progress % 10 == 0)
+    if (args.progress_unit() > 0 && progress % args.progress_unit() == 0)
     {
-      t_sub = t_pheno_res_cov = t_geno_res_cov = t_res = t_ols = t_write = 0;
-      std::cerr << "Processing phenotypes " << (progress + 1) << "-" <<  std::min(pheno_results.size(), progress + 10) << " ... " << std::flush;
-      //t = hrc::now();
+      t = hrc::now();
+      std::cerr << "Processing phenotypes " << (progress + 1) << "-" <<  std::min(pheno_results.size(), progress + 100) << " ... " << std::flush;
     }
     auto pf = pheno_name_to_idx.find(it->first);
     if (pf == pheno_name_to_idx.end())
-      return std::cerr << "Error: results file contains phenotype not in phenotype file\n", EXIT_FAILURE;
+      return std::cerr << "Error: results file contains phenotype (" << it->first << ") not in phenotype file\n", EXIT_FAILURE;
 
     //~~~~~~~~~~ subset pheno and geno vector ~~~~~~~~~~//
-    t = hrc::now();
     std::size_t pheno_idx = pf->second;
     assert(pheno_idx < phenos.size());
     std::vector<std::size_t> missing_map = utility::remove_missing(phenos[pheno_idx]);
@@ -304,27 +311,22 @@ int main(int argc, char** argv)
 
       //it->second[i]->set_genotype_index(i); // switch to using dense_geno index instead of genotypes index.
     }
-    t_sub += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
     //~~~~~~~~~~ END subset pheno and geno vector ~~~~~~~~~~//
 
     //~~~~~~~~~~ Regress out covariates ~~~~~~~~~~//
-    t = hrc::now();
     residualizer covariate_residualizer(xt::view(cov_mat, xt::keep(keep_samples), xt::all()));
     std::vector<scalar_type> pheno_resid = covariate_residualizer(phenos[pheno_idx], false);
     std::vector<scalar_type> pheno_resid_invnorm = pheno_resid;
     if (args.invnorm())
       inverse_normalize(pheno_resid_invnorm);
-    t_pheno_res_cov += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
 
     std::size_t dof_subtrahend = covariate_residualizer.n_predictors() + 2;
-    t = hrc::now();
     std::vector<linear_model::variable_stats<scalar_type>> dense_geno_stats(dense_genos.size());
     for (std::size_t i = 0; i < dense_genos.size(); ++i)
     {
       dense_genos[i] = covariate_residualizer(dense_genos[i], false);
       dense_geno_stats[i] =  linear_model::variable_stats<scalar_type>(dense_genos[i]);
     }
-    t_geno_res_cov += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
     //~~~~~~~~~~ END Regress out covariates ~~~~~~~~~~//
 
     /*for (std::size_t i = 0; i < it->second.size(); ++i)
@@ -375,7 +377,6 @@ int main(int argc, char** argv)
       linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
       //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
       */
-      t = hrc::now();
       max_assoc.pvalue = 2.;
       scalar_type max_abs_t = -1.;
       linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
@@ -407,7 +408,6 @@ int main(int argc, char** argv)
           }*/  
         }
       }
-      t_ols += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
 
       /*// Remove records in previous clump group
       std::size_t dest = 0;
@@ -435,7 +435,6 @@ int main(int argc, char** argv)
             max_idx = i;
           }
         }*/
-        t = hrc::now();
         assert(max_idx < it->second.size());
         if (!write_conditioned(output_file, 
           variant_ids[it->second[max_idx]->genotype_index()],
@@ -449,7 +448,6 @@ int main(int argc, char** argv)
         {
           return std::cerr << "Error: writint output record failed\n", EXIT_FAILURE;
         }
-        t_write += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
         
         dense_genos_mask[max_idx] = 1; // do not test this variant anymore
 
@@ -457,7 +455,6 @@ int main(int argc, char** argv)
         auto& top_geno = dense_genos[max_idx];
 
         //~~~~~~~~~~ regress out top genotype ~~~~~~~~~~//
-        t = hrc::now();
         ++dof_subtrahend;
         if (dof_subtrahend >= pheno_resid_invnorm.size())
         {
@@ -477,15 +474,13 @@ int main(int argc, char** argv)
           linear_model::residualize(dense_genos[i], dense_geno_stats[i], top_geno, top_geno_summary);
           dense_geno_stats[i] = linear_model::variable_stats<scalar_type>(dense_genos[i]);
         }
-        t_res += std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count();
         //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
       }
     }
 
     
-    if (++progress % 10 == 0 || progress == pheno_results.size())
-      std::cerr << t_sub << "," << t_pheno_res_cov << "," << t_geno_res_cov << "," << t_res << "," << t_ols << "," << t_write << std::endl;
-      //std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
+    if (args.progress_unit() > 0 && (++progress % args.progress_unit() == 0 || progress == pheno_results.size()))
+      std::cerr << "took " << std::chrono::duration_cast<std::chrono::seconds>(hrc::now() - t).count() << " seconds" << std::endl;
   }
   //========== END Run clumping ==========//
 
