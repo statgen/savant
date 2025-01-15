@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <algorithm>
 #include <type_traits>
-#include <assert.h>
+#include <cassert>
 
 /*
  * Adapted from https://github.com/hyunminkang/invNorm
@@ -15,7 +15,7 @@
 double stdnormal_cdf(double u);
 double stdnormal_inv(double p);
 
-//
+
 template <typename VecT>
 typename std::enable_if<std::is_floating_point<typename VecT::value_type>::value, void>::type
 inverse_normalize(VecT& vec, std::vector<std::reference_wrapper<typename VecT::value_type>>& rank_vec)

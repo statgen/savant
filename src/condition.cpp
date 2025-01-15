@@ -31,6 +31,7 @@ private:
   double pval_threshold_ = 2.;
   std::uint32_t seed_ = 7;
   int progress_unit_ = 100;
+  bool two_pass_ = false;
   bool invnorm_ = false;
   //bool write_all_ = false;
   bool help_ = false;
@@ -43,6 +44,7 @@ public:
       {"inv-norm", "", '\x01', "Inverse normalize response"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
       {"max-pvalue", "<real>", 'p', "Max p-value to clump"},
+      {"method", "<string>", 'm', "Either forward or two-pass (default: forward)"},
       {"progress", "<integer>", '\x02', "Number of phenotypes to group for progress logging (default: 100; disable: 0)"},
       {"version", "", 'v', "Print version"}})
   {
@@ -61,6 +63,7 @@ public:
   bool version_is_set() const { return version_; }
   //bool write_all() const { return write_all_; }
   bool invnorm() const { return invnorm_; }
+  bool two_pass() const { return two_pass_; }
 
   bool parse(int argc, char** argv)
   {
@@ -89,6 +92,9 @@ public:
       case 'h':
         help_ = true;
         return true;
+      case 'm':
+        two_pass_ = std::string(optarg ? optarg : "") == "two-pass";
+        break;
       case 'o':
         output_path_ = optarg ? optarg : "";
         break;
@@ -267,7 +273,7 @@ int main(int argc, char** argv)
     if (args.progress_unit() > 0 && progress % args.progress_unit() == 0)
     {
       t = hrc::now();
-      std::cerr << "Processing phenotypes " << (progress + 1) << "-" <<  std::min(pheno_results.size(), progress + 100) << " ... " << std::flush;
+      std::cerr << "Processing phenotypes " << (progress + 1) << "-" <<  std::min(pheno_results.size(), progress + args.progress_unit()) << " ... " << std::flush;
     }
     auto pf = pheno_name_to_idx.find(it->first);
     if (pf == pheno_name_to_idx.end())
@@ -291,10 +297,10 @@ int main(int argc, char** argv)
     for (std::size_t i = 0; i < dense_genos.size(); ++i)
     {
       dense_genos_mask[i] = 0;
+      dense_genos[i].clear();
       dense_genos[i].resize(phenos[pheno_idx].size());
       dense_genos_ac[i] = 0;
       const auto& g = genotypes[it->second[i]->genotype_index()];
-      std::size_t stride = genotype_strides[it->second[i]->genotype_index()];
 
       for (auto gt = g.begin(); gt != g.end(); ++gt)
       {
@@ -335,10 +341,12 @@ int main(int argc, char** argv)
       if (it->second[i]->pvalue() <= args.pval_threshold())
         it->second[i]->set_group(1);
     }*/
+
+    std::vector<std::size_t> geno_cov_indices;
     assert(it->second.size() > 0);
     const std::size_t ns = phenos[pheno_idx].size(); 
     std::size_t max_idx = std::size_t(-1);
-    linear_model::stats_t max_assoc;
+    linear_model::stats_t max_assoc, prev_assoc;
     for (std::int32_t group = 1; max_assoc.pvalue <= args.pval_threshold(); ++group)
     {
       /*double min_pvalue = 2.;
@@ -436,19 +444,26 @@ int main(int argc, char** argv)
           }
         }*/
         assert(max_idx < it->second.size());
-        if (!write_conditioned(output_file, 
-          variant_ids[it->second[max_idx]->genotype_index()],
-          it->second[max_idx]->string_variant_id(),
-          dense_genos_ac[max_idx] / (genotype_strides[it->second[max_idx]->genotype_index()] * ns),
-          dense_genos_ac[max_idx],
-          ns,
-          max_assoc,
-          it->first,
-          group))
+        if (args.two_pass())
         {
-          return std::cerr << "Error: writint output record failed\n", EXIT_FAILURE;
+          geno_cov_indices.push_back(max_idx);
+          prev_assoc = max_assoc;
         }
-        
+        else
+        {
+          if (!write_conditioned(output_file,
+              variant_ids[it->second[max_idx]->genotype_index()],
+              it->second[max_idx]->string_variant_id(),
+              dense_genos_ac[max_idx] / (genotype_strides[it->second[max_idx]->genotype_index()] * ns),
+              dense_genos_ac[max_idx],
+              ns,
+              max_assoc,
+              it->first,
+              group))
+          {
+            return std::cerr << "Error: writing output record failed\n", EXIT_FAILURE;
+          }
+        }
         dense_genos_mask[max_idx] = 1; // do not test this variant anymore
 
         assert(max_idx < dense_genos.size());
@@ -475,6 +490,132 @@ int main(int argc, char** argv)
           dense_geno_stats[i] = linear_model::variable_stats<scalar_type>(dense_genos[i]);
         }
         //~~~~~~~~~~ END regress out top genotype ~~~~~~~~~~//
+      }
+    }
+
+    if (args.two_pass() && geno_cov_indices.size())
+    {
+      if (geno_cov_indices.size() == 1)
+      {
+        std::size_t idx = geno_cov_indices[0];
+        if (!write_conditioned(output_file,
+          variant_ids[it->second[idx]->genotype_index()],
+          it->second[idx]->string_variant_id(),
+          dense_genos_ac[idx] / (genotype_strides[it->second[idx]->genotype_index()] * ns),
+          dense_genos_ac[idx],
+          ns,
+          prev_assoc,
+          it->first,
+          1))
+        {
+          return std::cerr << "Error: writing output record failed\n", EXIT_FAILURE;
+        }
+      }
+      else
+      {
+        for (std::size_t i = 0; i < dense_genos.size(); ++i)
+        {
+          dense_genos_mask[i] = 0;
+          dense_genos[i].clear();
+          dense_genos[i].resize(phenos[pheno_idx].size());
+          //dense_genos_ac[i] = 0;
+          const auto& g = genotypes[it->second[i]->genotype_index()];
+
+          for (auto gt = g.begin(); gt != g.end(); ++gt)
+          {
+            if (missing_map[gt.offset()] < dense_genos[i].size())
+            {
+              dense_genos[i][missing_map[gt.offset()]] = *gt;
+              //dense_genos_ac[i] += *gt;
+            }
+          }
+        }
+
+        xt::xtensor<scalar_type, 2> cond_cov_mat = xt::concatenate(xt::xtuple(xt::view(cov_mat, xt::keep(keep_samples), xt::all()), xt::zeros<scalar_type>({keep_samples.size(), geno_cov_indices.size()})), 1);
+        for (std::size_t i = 0; i < geno_cov_indices.size(); ++i)
+        {
+          const auto& g = genotypes[it->second[geno_cov_indices[i]]->genotype_index()];
+          for (auto gt = g.begin(); gt != g.end(); ++gt)
+          {
+            if (missing_map[gt.offset()] < ns)
+              cond_cov_mat(missing_map[gt.offset()], cov_mat.shape()[1] + i) = *gt;
+          }
+        }
+
+        std::vector<linear_model::stats_t> top_assoc_vec;
+        std::vector<std::size_t> top_assoc_idx_vec;
+        top_assoc_vec.reserve(geno_cov_indices.size());
+        top_assoc_idx_vec.reserve(geno_cov_indices.size());
+
+        for (std::int32_t c = 0; c < geno_cov_indices.size(); ++c)
+        {
+          residualizer covariate_residualizer(xt::view(cond_cov_mat, xt::all(), xt::drop(cov_mat.shape()[1] + c)));
+
+          std::vector<scalar_type> pheno_resid = covariate_residualizer(phenos[pheno_idx], false);
+          std::vector<scalar_type> pheno_resid_invnorm = pheno_resid;
+          if (args.invnorm())
+            inverse_normalize(pheno_resid_invnorm);
+
+          max_assoc.pvalue = 2.;
+          scalar_type max_abs_t = -1.;
+          linear_model::variable_stats<scalar_type> pheno_resid_invnorm_summary(pheno_resid_invnorm);
+          std::vector<scalar_type> dense_geno_resid;
+          for (std::size_t i = 0; i < dense_genos.size(); ++i)
+          {
+            if (!dense_genos_mask[i])
+            {
+              // std::size_t g_idx = it->second[i]->genotype_index();
+              // linear_model::residualize(dense_genos[g_idx], dense_geno_stats[g_idx], top_geno, top_geno_summary);
+              // dense_geno_stats[g_idx] = linear_model::variable_stats<scalar_type>(dense_genos[g_idx]);
+              dense_geno_resid = covariate_residualizer(dense_genos[i], false);
+              auto s = linear_model::ols(pheno_resid_invnorm.size(),
+                std::inner_product(dense_geno_resid.begin(), dense_geno_resid.end(), pheno_resid_invnorm.begin(), scalar_type()),
+                linear_model::variable_stats<scalar_type>(dense_geno_resid),
+                pheno_resid_invnorm_summary,
+                pheno_resid_invnorm.size() - covariate_residualizer.n_predictors() + 2);
+
+              if (std::abs(s.t) > max_abs_t)
+              {
+                max_assoc = s;
+                max_abs_t = std::abs(s.t);
+                max_idx = i;
+              }
+            }
+          }
+
+          if (max_assoc.pvalue <= args.pval_threshold())
+          {
+            top_assoc_vec.push_back(max_assoc);
+            top_assoc_idx_vec.push_back(max_idx);
+            dense_genos_mask[max_idx] = 1; // do not test this variant anymore
+          }
+        }
+
+        // rank top associations by absolute t-statistic.
+        std::vector<std::size_t> rank_map(top_assoc_vec.size());
+        std::iota(rank_map.begin(), rank_map.end(), 0);
+        std::sort(rank_map.begin(), rank_map.end(), [&top_assoc_vec](std::size_t l, std::size_t r) { return std::abs(top_assoc_vec[l].t) > std::abs(top_assoc_vec[r].t); });
+
+        for (std::size_t rank = 0; rank < rank_map.size(); ++rank)
+        {
+          std::size_t idx = top_assoc_idx_vec[rank_map[rank]];
+          assert(idx < it->second.size());
+          assert(idx < dense_genos_ac.size());
+          assert(idx < dense_genos_mask.size());
+
+          if (!write_conditioned(output_file,
+            variant_ids[it->second[idx]->genotype_index()],
+            it->second[idx]->string_variant_id(),
+            dense_genos_ac[idx] / (genotype_strides[it->second[idx]->genotype_index()] * ns),
+            dense_genos_ac[idx],
+            ns,
+            top_assoc_vec[rank_map[rank]],
+            it->first,
+            rank + 1))
+          {
+            return std::cerr << "Error: writing output record failed\n", EXIT_FAILURE;
+          }
+        }
       }
     }
 
