@@ -212,7 +212,7 @@ bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno
     ++i;
     for (auto it = q.begin(); it != q.end(); ++it)
     {
-      while (i < variant_ids.size() && variant_ids[i].pos >= it->region_start() && variant_ids[i].pos <= it->region_end())
+      while (i < variant_ids.size() && variant_ids[i].chrom == r.chromosome() && variant_ids[i].pos >= it->region_start() && variant_ids[i].pos <= it->region_end())
       {
         r = savvy::genomic_region(r.chromosome(), r.from(), variant_ids[i].pos);
         assert(r.from() <= r.to());
@@ -243,7 +243,7 @@ bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno
 
     while (id_it != variant_ids.end() && geno_file >> var)
     {
-      while(id_it != variant_ids.end() && var.pos() > id_it->pos)
+      while(id_it != variant_ids.end() && var.chromosome() == id_it->chrom && var.pos() > id_it->pos)
       {
         if (genotypes[id_it - variant_ids.begin()].size() == 0)
           return std::cerr << "Error: could not find " << id_it->to_string() << " in genotype file\n", false;
