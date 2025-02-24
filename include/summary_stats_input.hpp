@@ -203,7 +203,6 @@ bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno
     return std::cerr << "Error: could not open SAV index\n", false;
 
   std::list<savvy::genomic_region> regions;
-
   std::size_t i = 0;
   while (i < variant_ids.size())
   {
@@ -236,6 +235,7 @@ bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno
 
   auto id_it = variant_ids.begin();
   savvy::variant var;
+
   for (const auto& r : regions)
   {
     if (!geno_file.reset_bounds(r))
@@ -243,14 +243,14 @@ bool load_variant_id_genotypes(savvy::reader& geno_file, const std::string& geno
 
     while (id_it != variant_ids.end() && geno_file >> var)
     {
-      while(id_it != variant_ids.end() && var.chromosome() == id_it->chrom && var.pos() > id_it->pos)
+      while(id_it != variant_ids.end() && (var.chromosome() != id_it->chrom || var.pos() > id_it->pos))
       {
         if (genotypes[id_it - variant_ids.begin()].size() == 0)
           return std::cerr << "Error: could not find " << id_it->to_string() << " in genotype file\n", false;
         ++id_it;
       }
 
-      for  (auto lit = id_it; lit != variant_ids.end() && var.pos() == lit->pos; ++lit)
+      for  (auto lit = id_it; lit != variant_ids.end() && var.chromosome() == lit->chrom && var.pos() == lit->pos; ++lit)
       {
         if (lit->matches(var))
         {
