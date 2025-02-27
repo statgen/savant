@@ -794,72 +794,13 @@ bool process_variant(const savvy::site_info& var, const std::vector<std::vector<
   return true;
 }
 
-bool process_trans_batch(const std::vector<std::vector<scalar_type>>& phenos,  const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, const std::vector<std::vector<std::size_t>>& permutation_matrix, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
+bool process_trans_batch(const std::vector<std::vector<scalar_type>>& pheno_resids, const std::vector<linear_model::variable_stats<scalar_type>>& pheno_stats, std::vector<discovery_counter>& discovery_counts, const std::vector<residualizer>& residualizers, const std::vector<std::vector<std::size_t>>& subset_non_missing_map, savvy::reader& geno_file, /*std::ostream*/output_wrapper& output_file, const qtl_prog_args& args)
 {
-  if (phenos.empty())
+  if (pheno_resids.empty())
     return false;
-#if 0 // PERMUTATION
-  std::size_t n_perm = 1;
-  std::vector<std::size_t> random_map(subset_non_missing_map.front().size());
-  std::iota(random_map.begin(), random_map.end(), 0);
-  std::default_random_engine prng{7};
-  std::shuffle(random_map.begin(), random_map.end(), prng);
-  std::vector<scalar_type> tmp_resid;
-#endif
 
-  std::vector<discovery_counter> discovery_counts;
-  std::size_t n_perm = permutation_matrix.size();
-  std::vector<linear_model::variable_stats<scalar_type>> pheno_stats(phenos.size());
-  std::vector<std::vector<scalar_type>> pheno_resids(phenos.size());
-  for (std::size_t pheno_idx = 0; pheno_idx < phenos.size(); ++pheno_idx)
-  {
-    pheno_resids[pheno_idx] = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](phenos[pheno_idx], args.invnorm());
-    pheno_stats[pheno_idx] = linear_model::variable_stats<scalar_type>(pheno_resids[pheno_idx]);
-
-#if 1 // PERMUTATION
-    if (n_perm)
-    {
-      assert(!subset_non_missing_map.empty());
-      std::size_t stride = n_perm + 1;
-      discovery_counts.resize(stride);
-      std::vector<scalar_type> tmp_pheno_with_perm(pheno_resids[pheno_idx].size() * stride, std::numeric_limits<scalar_type>::quiet_NaN());
-
-      for (std::size_t i = 0; i < pheno_resids[pheno_idx].size(); ++i)
-        tmp_pheno_with_perm[i * stride] = pheno_resids[pheno_idx][i];
-
-      for (std::size_t perm_idx = 0; perm_idx < n_perm; ++perm_idx)
-      {
-        std::size_t dest_idx = 0;
-        for (std::size_t i = 0; i < permutation_matrix[perm_idx].size(); ++i)
-        {
-          std::size_t primary_idx = subset_non_missing_map[pheno_idx][permutation_matrix[perm_idx][i]];
-          if (primary_idx < pheno_resids[pheno_idx].size())
-          {
-            tmp_pheno_with_perm[(dest_idx++) * stride + (perm_idx+1)] = pheno_resids[pheno_idx][primary_idx];
-          }
-        }
-        assert(dest_idx == pheno_resids[pheno_idx].size());
-      }
-      std::swap(pheno_resids[pheno_idx], tmp_pheno_with_perm);
-    }
-
-//    assert(i < pheno_resids.size());
-//    assert(i < subset_non_missing_map.size());
-//    tmp_resid.clear();
-//    tmp_resid.reserve(pheno_resids[i].size());
-//    std::vector<std::size_t> shuffled_subset_non_missing_map(subset_non_missing_map[i].size());
-//    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
-//      shuffled_subset_non_missing_map[random_map[j]] = subset_non_missing_map[i][j];
-//
-//    for (std::size_t j = 0; j < shuffled_subset_non_missing_map.size(); ++j)
-//    {
-//      std::size_t src_idx = shuffled_subset_non_missing_map[j];
-//      if (src_idx < pheno_resids[i].size())
-//        tmp_resid.push_back(pheno_resids[i][src_idx]);
-//    }
-//    pheno_resids[i] = tmp_resid;
-#endif
-  }
+  if (args.region() && !geno_file.reset_bounds(*args.region()))
+    return std::cerr << "Could not open genomic region\n", false;
 
   auto total_start = std::chrono::high_resolution_clock::now();
 
@@ -992,9 +933,6 @@ int trans_qtl_main(int argc, char** argv)
     return std::cerr << "Could not open geno file\n", EXIT_FAILURE;
   geno_file.phasing_status(savvy::phasing::none); // Faster parsing of BCF/VCF
 
-  if (args.region() && !geno_file.reset_bounds(*args.region()))
-    return std::cerr << "Could not open genomic region\n", EXIT_FAILURE;
-
   std::vector<std::string> sample_intersection;
   std::vector<std::string> pheno_names;
   std::vector<std::vector<scalar_type>> phenos;
@@ -1008,19 +946,19 @@ int trans_qtl_main(int argc, char** argv)
   else if (!parse_covariates_file(args.cov_path(), sample_intersection, cov_mat, cov_names))
     return std::cerr << "Error: failed parsing covariates file\n", EXIT_FAILURE;
 
-  std::vector<std::vector<std::size_t>> permute_matrix;
+  std::vector<std::vector<std::size_t>> permutation_matrix;
   if (!args.discovery_counts_path().empty())
   {
     if (args.perm_path().empty())
     {
-      permute_matrix.resize(1, {sample_intersection.size()});
-      std::iota(permute_matrix.front().begin(), permute_matrix.front().end(), 0);
+      permutation_matrix.resize(1, {sample_intersection.size()});
+      std::iota(permutation_matrix.front().begin(), permutation_matrix.front().end(), 0);
       std::default_random_engine prng{args.seed()};
-      std::shuffle(permute_matrix.front().begin(), permute_matrix.front().end(), prng);
+      std::shuffle(permutation_matrix.front().begin(), permutation_matrix.front().end(), prng);
     }
     else
     {
-      if (!parse_permutation_file(args, sample_intersection, permute_matrix))
+      if (!parse_permutation_file(args, sample_intersection, permutation_matrix))
         return std::cerr << "Error: failed parsing permutation file file\n", EXIT_FAILURE;
     }
   }
@@ -1093,11 +1031,48 @@ int trans_qtl_main(int argc, char** argv)
     return EXIT_FAILURE;
   }
 
+  std::vector<discovery_counter> discovery_counts;
+  std::size_t n_perm = permutation_matrix.size();
+  if (n_perm)
+    discovery_counts.resize(n_perm + 1);
+  std::vector<linear_model::variable_stats<scalar_type>> pheno_stats(phenos.size());
+  std::vector<std::vector<scalar_type>> pheno_resids(phenos.size());
+  for (std::size_t pheno_idx = 0; pheno_idx < phenos.size(); ++pheno_idx)
+  {
+    pheno_resids[pheno_idx] = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](phenos[pheno_idx], args.invnorm());
+    pheno_stats[pheno_idx] = linear_model::variable_stats<scalar_type>(pheno_resids[pheno_idx]);
+
+    if (n_perm)
+    {
+      assert(!subset_non_missing_map.empty());
+      std::size_t stride = n_perm + 1;
+      std::vector<scalar_type> tmp_pheno_with_perm(pheno_resids[pheno_idx].size() * stride, std::numeric_limits<scalar_type>::quiet_NaN());
+
+      for (std::size_t i = 0; i < pheno_resids[pheno_idx].size(); ++i)
+        tmp_pheno_with_perm[i * stride] = pheno_resids[pheno_idx][i];
+
+      for (std::size_t perm_idx = 0; perm_idx < n_perm; ++perm_idx)
+      {
+        std::size_t dest_idx = 0;
+        for (std::size_t i = 0; i < permutation_matrix[perm_idx].size(); ++i)
+        {
+          std::size_t primary_idx = subset_non_missing_map[pheno_idx][permutation_matrix[perm_idx][i]];
+          if (primary_idx < pheno_resids[pheno_idx].size())
+          {
+            tmp_pheno_with_perm[(dest_idx++) * stride + (perm_idx+1)] = pheno_resids[pheno_idx][primary_idx];
+          }
+        }
+        assert(dest_idx == pheno_resids[pheno_idx].size());
+      }
+      std::swap(pheno_resids[pheno_idx], tmp_pheno_with_perm);
+    }
+  }
+
   //shrinkwrap::bgzf::ostream output_file(args.output_path());
   //output_file << "geno_chrom\tgeno_pos\tref\talt\tvariant_id\tmaf\tmac\tns\t" << linear_model::stats_t::header_column_names() << "\tpheno_id" << std::endl;
   output_wrapper output(args.output_path(), pheno_names, args.split_output());
 
-  if (!process_trans_batch(phenos, residualizers, subset_non_missing_map, permute_matrix, /* genos,*/ geno_file, output, args))
+  if (!process_trans_batch(pheno_resids, pheno_stats, discovery_counts, residualizers, subset_non_missing_map, geno_file, output, args))
     return std::cerr << "Error: processing batch failed\n", EXIT_FAILURE;
 
 
