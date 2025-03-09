@@ -250,9 +250,24 @@ public:
       case 'r':
         region_.reset(new savvy::genomic_region(utility::string_to_region(optarg ? optarg : "")));
         break;
+      case 'A':
+        {
+          auto tmp = utility::split_string_to_vector(optarg ? optarg : "", ',');
+          consequences_.insert(tmp.begin(), tmp.end());
+        }
+        break;
+      case 'I':
+        {
+          auto tmp = utility::split_string_to_vector(optarg ? optarg : "", ',');
+          impacts_.insert(tmp.begin(), tmp.end());
+        }
+        break;
       case 'R':
         if (!parse_bed_file(optarg ? optarg : "", collapse_regions_))
           return std::cerr << "Error: failed to parse --collapse-regions file\n", false;
+        break;
+      case 'T':
+        rare_treshold_ = std::atof(optarg ? optarg : "");
         break;
       default:
         return false;
@@ -976,13 +991,6 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
   if (pheno_resids.empty())
     return false;
 
-  std::unordered_set<std::string> impacts = {"HIGH"}; // TODO:
-  savvy::genomic_region reg = args.collapse_regions().front().second; // TODO:
-  std::string reg_id = args.collapse_regions().front().first;
-
-  if (!geno_file.reset_bounds(reg))
-    return std::cerr << "Could not open genomic region\n", false;
-
   auto total_start = std::chrono::high_resolution_clock::now();
 
   savvy::compressed_vector<std::int8_t> geno;
@@ -990,44 +998,61 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
   savvy::variant var;
   std::string ann;
   std::vector<std::string> ann_vec;
-  while (geno_file.read(var))
+  for (auto reg_it = args.collapse_regions().begin(); reg_it != args.collapse_regions().end(); ++reg_it)
   {
-    double af = std::numeric_limits<double>::quiet_NaN();
-    std::int64_t ac, an;
-    if (!var.get_info("AF", af))
+    burden_dense.clear();
+
+    if (!geno_file.reset_bounds(reg_it->second))
+      return std::cerr << "Could not open genomic region\n", false;
+
+    std::size_t var_cnt = 0;
+    while (geno_file.read(var))
     {
-      if (var.get_info("AC", ac) && var.get_info("AN", an))
-        af = double(ac) / double(an);
-    }
+      std::vector<double> af;
+      std::vector<std::int64_t> ac;
+      std::int64_t an;
+      if (!var.get_info("AF", af))
+      {
+        if (var.get_info("AC", ac) && var.get_info("AN", an))
+        {
+          for (auto a : ac)
+            af.push_back(double(a) / double(an));
+        }
+      }
 
-    if (std::isnan(af))
-      return std::cerr << "Error: AF or AC/AN INFO fields must be present for burden testing\n", false;
+      if (af.empty())
+        return std::cerr << "Error: AF or AC/AN INFO fields must be present for burden testing\n", false;
+      else if (af.size() != var.alts().size())
+        return std::cerr << "Error: AF or AC size does not match ALT size\n", false;
 
-    if (af >= args.rare_threshold()) continue;
 
-    bool geno_ready = false;
+      bool geno_ready = false;
 
-    bool fetch_ann = true;
-    if (fetch_ann)
-    {
-      if (!var.get_info("ANN", ann))
-        return std::cerr << "Error: INFO/ANN must be present when using --collapse-anno or --collapse-impact\n", false;
-      ann_vec = utility::split_string_to_vector(ann, ',');
-    }
-
-    for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
-    {
+      bool fetch_ann = args.impacts().size() || args.consequences().size();
       if (fetch_ann)
       {
-        std::string allele = var.alts()[alt_idx-1];
-        bool process_allele = false;
-        for (auto it = ann_vec.begin(); it != ann_vec.end() && !process_allele; ++it)
+        if (!var.get_info("ANN", ann))
+          return std::cerr << "Error: INFO/ANN must be present when using --collapse-anno or --collapse-impact\n", false;
+        ann_vec = utility::split_string_to_vector(ann, ',');
+      }
+
+      for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
+      {
+        if (af[alt_idx - 1] >= args.rare_threshold()) continue;
+
+        bool process_allele = true;
+        if (fetch_ann)
         {
-          auto ann_fields = utility::split_string_to_vector(*it, '|');
-          if (ann_fields.size() > 2 && ann_fields[0] == allele)
+          std::string allele = var.alts()[alt_idx - 1];
+          process_allele = false;
+          for (auto it = ann_vec.begin(); it != ann_vec.end() && !process_allele; ++it)
           {
-            if (impacts.size() && impacts.find(ann_fields[2]) != impacts.end())
-              process_allele = true;
+            auto ann_fields = utility::split_string_to_vector(*it, '|');
+            if (ann_fields.size() > 2 && ann_fields[0] == allele)
+            {
+              if ((args.impacts().size() && args.impacts().find(ann_fields[2]) != args.impacts().end()) || (args.consequences().size() && args.consequences().find(ann_fields[2]) != args.consequences().end()))
+                process_allele = true;
+            }
           }
         }
 
@@ -1050,17 +1075,21 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
             else if (savvy::typed_value::is_end_of_vector(*gt))
               burden_dense[gt.offset()] = *gt;
           }
+          ++var_cnt;
         }
       }
     }
+
+    if (var_cnt)
+    {
+      assert(!subset_non_missing_map.empty());
+      std::size_t ploidy = burden_dense.size() / subset_non_missing_map[0].size();
+      savvy::stride_reduce(burden_dense, ploidy, savvy::plus_eov<scalar_type>());
+
+      if (!process_burden_vector(reg_it->second, reg_it->first, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, burden_dense, output_file, args, ploidy, discovery_counts))
+        return false;
+    }
   }
-
-  assert(!subset_non_missing_map.empty());
-  std::size_t ploidy = burden_dense.size() / subset_non_missing_map[0].size();
-  savvy::stride_reduce(burden_dense, ploidy, savvy::plus_eov<scalar_type>());
-
-  if (!process_burden_vector(reg, reg_id, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, burden_dense, output_file, args, ploidy, discovery_counts))
-    return false;
 
   std::cerr << "total_duration:" << std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - total_start).count() << std::endl;
 
