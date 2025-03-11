@@ -20,7 +20,12 @@
 #include <string>
 #include <utility>
 
-enum class collapse_weight_t { none = 0, madsen_browning };
+enum class collapse_method_t
+{
+  sum = 0,
+  madsen_browning, // Madsen-Browning method (https://doi.org/10.1371/journal.pgen.1000384)
+  cast // Similar to CAST method (https://doi.org/10.1016/j.mrfmmm.2006.09.003) but uses additive model with phased genotypes (0, 1, or 2 haplotypes have at least one alternate allele).
+};
 
 class qtl_prog_args : public getopt_wrapper
 {
@@ -41,7 +46,7 @@ private:
   std::string debug_log_path_ = "/dev/null";
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
-  collapse_weight_t collapse_weight_ = collapse_weight_t::madsen_browning;
+  collapse_method_t collapse_method_ = collapse_method_t::madsen_browning;
   double rare_treshold_ = 0.01;
   double min_mac_ = 1.0;
   double min_maf_ = 0.f;
@@ -56,11 +61,11 @@ private:
 public:
   qtl_prog_args() :
     getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
+      {"collapse-method", "<string>", 'M', "Method for collapsing variants (madsen-browning, sum, or cast)"},
       {"collapse-regions", "<file>", 'R', "BED file of regions to collapse for rare variant testing"},
       {"collapse-threshold", "<real>", 'T', "AF threshold for burden test (default: 0.01)"},
       {"collapse-anno", "<string>", 'A', "Comma-separated list of INFO/ANN annotation values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
       {"collapse-impact", "<string>", 'I', "Comma-separated list of INFO/ANN impact values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
-      {"collapse-weight", "<string>", 'W', "Weighting scheme used for collapsing variants (madsen-browning or none; default: madsen-browning)"},
       {"cov", "<file>", 'c', "Covariates file"},
       {"debug-log", "<file>", '\x02', "Enables debug logging and specifies log file"},
       {"discovery-counts", "<file>", '\x02', "Writes discovery counts to specified file for use in empirical FDR calculation"},
@@ -109,7 +114,7 @@ public:
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
-  collapse_weight_t collapse_weight() const { return collapse_weight_; }
+  collapse_method_t collapse_method() const { return collapse_method_; }
   double rare_threshold() const { return rare_treshold_; }
   double min_mac() const { return min_mac_; }
   double min_maf() const { return min_maf_; }
@@ -278,11 +283,13 @@ public:
         {
           std::string w(optarg ? optarg : "");
           if (w == "madsen-browning")
-            collapse_weight_ = collapse_weight_t::madsen_browning;
-          else if (w == "none")
-            collapse_weight_ = collapse_weight_t::none;
+            collapse_method_ = collapse_method_t::madsen_browning;
+          else if (w == "sum")
+            collapse_method_ = collapse_method_t::sum;
+          else if (w == "cast")
+            collapse_method_ = collapse_method_t::cast;
           else
-            return std::cerr << "Error: invalid --collapse-weight\n", false;
+            return std::cerr << "Error: invalid --collapse-method\n", false;
         }
         break;
       default:
@@ -1085,13 +1092,26 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
             geno_ready = true;
           }
 
-          scalar_type weight = consequence_weight * (args.collapse_weight() == collapse_weight_t::madsen_browning ?  1. / std::sqrt(af[alt_idx - 1] * (1. - af[alt_idx - 1])) : 1.);
-          for (auto gt = geno.begin(); gt != geno.end(); ++gt)
+          if (args.collapse_method() == collapse_method_t::cast)
           {
-            if (*gt == alt_idx)
-              burden_dense[gt.offset()] += weight;
-            else if (savvy::typed_value::is_end_of_vector(*gt))
-              burden_dense[gt.offset()] = *gt;
+            for (auto gt = geno.begin(); gt != geno.end(); ++gt)
+            {
+              if (*gt == alt_idx)
+                burden_dense[gt.offset()] = std::max(burden_dense[gt.offset()], consequence_weight);
+              else if (savvy::typed_value::is_end_of_vector(*gt))
+                burden_dense[gt.offset()] = *gt;
+            }
+          }
+          else
+          {
+            scalar_type weight = consequence_weight * (args.collapse_method() == collapse_method_t::madsen_browning ? 1. / std::sqrt(af[alt_idx - 1] * (1. - af[alt_idx - 1])) : 1.);
+            for (auto gt = geno.begin(); gt != geno.end(); ++gt)
+            {
+              if (*gt == alt_idx)
+                burden_dense[gt.offset()] += weight;
+              else if (savvy::typed_value::is_end_of_vector(*gt))
+                burden_dense[gt.offset()] = *gt;
+            }
           }
           ++var_cnt;
         }
