@@ -18,6 +18,22 @@
 
 struct utility
 {
+  template<typename T>
+  static double std_dev(const std::vector<T>& v)
+  {
+    double mu = std::accumulate(v.begin(), v.end(), 0.) / v.size();
+    double ret = 0.;
+    std::for_each(v.begin(), v.end(), [mu, &ret](const double d) { ret += (d - mu) * (d - mu); });
+    return std::sqrt(ret / v.size());
+  }
+
+  template<typename T>
+  static void scale(std::vector<T>& v)
+  {
+    T sd = std_dev(v);
+    std::for_each(v.begin(), v.end(), [sd](T& d) { d = d / sd; });
+  }
+
   static std::vector<std::string> split_string_to_vector(const char* in, char delim)
   {
     std::vector<std::string> ret;

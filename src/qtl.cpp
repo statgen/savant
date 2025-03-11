@@ -20,6 +20,8 @@
 #include <string>
 #include <utility>
 
+enum class collapse_weight_t { none = 0, madsen_browning };
+
 class qtl_prog_args : public getopt_wrapper
 {
 private:
@@ -39,6 +41,7 @@ private:
   std::string debug_log_path_ = "/dev/null";
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
+  collapse_weight_t collapse_weight_ = collapse_weight_t::madsen_browning;
   double rare_treshold_ = 0.01;
   double min_mac_ = 1.0;
   double min_maf_ = 0.f;
@@ -57,6 +60,7 @@ public:
       {"collapse-threshold", "<real>", 'T', "AF threshold for burden test (default: 0.01)"},
       {"collapse-anno", "<string>", 'A', "Comma-separated list of INFO/ANN annotation values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
       {"collapse-impact", "<string>", 'I', "Comma-separated list of INFO/ANN impact values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
+      {"collapse-weight", "<string>", 'W', "Weighting scheme used for collapsing variants (madsen-browning or none; default: madsen-browning)"},
       {"cov", "<file>", 'c', "Covariates file"},
       {"debug-log", "<file>", '\x02', "Enables debug logging and specifies log file"},
       {"discovery-counts", "<file>", '\x02', "Writes discovery counts to specified file for use in empirical FDR calculation"},
@@ -105,6 +109,7 @@ public:
   const std::string& fmt_field() const { return fmt_field_; }
   const std::string& debug_log_path() const { return debug_log_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
+  collapse_weight_t collapse_weight() const { return collapse_weight_; }
   double rare_threshold() const { return rare_treshold_; }
   double min_mac() const { return min_mac_; }
   double min_maf() const { return min_maf_; }
@@ -268,6 +273,17 @@ public:
         break;
       case 'T':
         rare_treshold_ = std::atof(optarg ? optarg : "");
+        break;
+      case 'W':
+        {
+          std::string w(optarg ? optarg : "");
+          if (w == "madsen-browning")
+            collapse_weight_ = collapse_weight_t::madsen_browning;
+          else if (w == "none")
+            collapse_weight_ = collapse_weight_t::none;
+          else
+            return std::cerr << "Error: invalid --collapse-weight\n", false;
+        }
         break;
       default:
         return false;
@@ -1027,6 +1043,7 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
 
 
       bool geno_ready = false;
+      scalar_type consequence_weight = 1.;
 
       bool fetch_ann = args.impacts().size() || args.consequences().size();
       if (fetch_ann)
@@ -1068,10 +1085,11 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
             geno_ready = true;
           }
 
+          scalar_type weight = consequence_weight * (args.collapse_weight() == collapse_weight_t::madsen_browning ?  1. / std::sqrt(af[alt_idx - 1] * (1. - af[alt_idx - 1])) : 1.);
           for (auto gt = geno.begin(); gt != geno.end(); ++gt)
           {
             if (*gt == alt_idx)
-              burden_dense[gt.offset()] += 1; // TODO: maybe add weight by AF option
+              burden_dense[gt.offset()] += weight;
             else if (savvy::typed_value::is_end_of_vector(*gt))
               burden_dense[gt.offset()] = *gt;
           }
@@ -1085,6 +1103,7 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
       assert(!subset_non_missing_map.empty());
       std::size_t ploidy = burden_dense.size() / subset_non_missing_map[0].size();
       savvy::stride_reduce(burden_dense, ploidy, savvy::plus_eov<scalar_type>());
+      utility::scale(burden_dense); // Note: scaling to normalize effect size, but this is computationally wasteful.
 
       if (!process_burden_vector(reg_it->second, reg_it->first, pheno_resids, pheno_stats, residualizers, subset_non_missing_map, burden_dense, output_file, args, ploidy, discovery_counts))
         return false;
