@@ -24,7 +24,8 @@ enum class collapse_method_t
 {
   sum = 0,
   madsen_browning, // Madsen-Browning method (https://doi.org/10.1371/journal.pgen.1000384)
-  cast // Similar to CAST method (https://doi.org/10.1016/j.mrfmmm.2006.09.003) but uses additive model with phased genotypes (0, 1, or 2 haplotypes have at least one alternate allele).
+  cast, // Similar to CAST method (https://doi.org/10.1016/j.mrfmmm.2006.09.003) but uses additive model with phased genotypes (0, 1, or 2 haplotypes have at least one alternate allele).
+  weighted_cast
 };
 
 class qtl_prog_args : public getopt_wrapper
@@ -61,7 +62,7 @@ private:
 public:
   qtl_prog_args() :
     getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
-      {"collapse-method", "<string>", 'M', "Method for collapsing variants (madsen-browning, sum, or cast)"},
+      {"collapse-method", "<string>", 'M', "Method for collapsing variants (madsen-browning, sum, cast, weighted-cast)"},
       {"collapse-regions", "<file>", 'R', "BED file of regions to collapse for rare variant testing"},
       {"collapse-threshold", "<real>", 'T', "AF threshold for burden test (default: 0.01)"},
       {"collapse-anno", "<string>", 'A', "Comma-separated list of INFO/ANN annotation values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
@@ -279,7 +280,7 @@ public:
       case 'T':
         rare_treshold_ = std::atof(optarg ? optarg : "");
         break;
-      case 'W':
+      case 'M':
         {
           std::string w(optarg ? optarg : "");
           if (w == "madsen-browning")
@@ -288,6 +289,8 @@ public:
             collapse_method_ = collapse_method_t::sum;
           else if (w == "cast")
             collapse_method_ = collapse_method_t::cast;
+          else if (w == "weighted-cast")
+            collapse_method_ = collapse_method_t::weighted_cast;
           else
             return std::cerr << "Error: invalid --collapse-method\n", false;
         }
@@ -1050,7 +1053,6 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
 
 
       bool geno_ready = false;
-      scalar_type consequence_weight = 1.;
 
       bool fetch_ann = args.impacts().size() || args.consequences().size();
       if (fetch_ann)
@@ -1064,6 +1066,7 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
       {
         if (af[alt_idx - 1] >= args.rare_threshold()) continue;
 
+        scalar_type consequence_weight = 1.;
         bool process_allele = true;
         if (fetch_ann)
         {
@@ -1092,12 +1095,13 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
             geno_ready = true;
           }
 
-          if (args.collapse_method() == collapse_method_t::cast)
+          if (args.collapse_method() == collapse_method_t::cast || args.collapse_method() == collapse_method_t::weighted_cast)
           {
+            scalar_type weight = consequence_weight * (args.collapse_method() == collapse_method_t::weighted_cast ? 1. / std::sqrt(af[alt_idx - 1] * (1. - af[alt_idx - 1])) : 1.);
             for (auto gt = geno.begin(); gt != geno.end(); ++gt)
             {
               if (*gt == alt_idx)
-                burden_dense[gt.offset()] = std::max(burden_dense[gt.offset()], consequence_weight);
+                burden_dense[gt.offset()] = std::max(burden_dense[gt.offset()], weight);
               else if (savvy::typed_value::is_end_of_vector(*gt))
                 burden_dense[gt.offset()] = *gt;
             }
