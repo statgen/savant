@@ -48,7 +48,7 @@ private:
   std::string fmt_field_ = "";
   std::unique_ptr<savvy::genomic_region> region_;
   collapse_method_t collapse_method_ = collapse_method_t::madsen_browning;
-  double rare_treshold_ = 0.01;
+  double rare_threshold_ = 0.5;
   double min_mac_ = 1.0;
   double min_maf_ = 0.f;
   double max_pval_ = 2.;
@@ -64,7 +64,7 @@ public:
     getopt_wrapper("Usage: savant qtl [opts ...] <geno_file> <pheno_file>", {
       {"collapse-method", "<string>", 'M', "Method for collapsing variants (madsen-browning, sum, cast, weighted-cast)"},
       {"collapse-regions", "<file>", 'R', "BED file of regions to collapse for rare variant testing"},
-      {"collapse-threshold", "<real>", 'T', "AF threshold for burden test (default: 0.01)"},
+      {"collapse-threshold", "<real>", 'T', "AF threshold for burden test (default: 0.5)"}, // TODO: flip genotypes for AF > 0.5 
       {"collapse-anno", "<string>", 'A', "Comma-separated list of INFO/ANN annotation values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
       {"collapse-impact", "<string>", 'I', "Comma-separated list of INFO/ANN impact values to include in analysis (see https://pcingola.github.io/SnpEff/adds/VCFannotationformat_v1.0.pdf)"},
       {"cov", "<file>", 'c', "Covariates file"},
@@ -116,7 +116,7 @@ public:
   const std::string& debug_log_path() const { return debug_log_path_; }
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   collapse_method_t collapse_method() const { return collapse_method_; }
-  double rare_threshold() const { return rare_treshold_; }
+  double rare_threshold() const { return rare_threshold_; }
   double min_mac() const { return min_mac_; }
   double min_maf() const { return min_maf_; }
   double max_pval() const { return max_pval_; }
@@ -278,7 +278,7 @@ public:
           return std::cerr << "Error: failed to parse --collapse-regions file\n", false;
         break;
       case 'T':
-        rare_treshold_ = std::atof(optarg ? optarg : "");
+        rare_threshold_ = std::atof(optarg ? optarg : "");
         break;
       case 'M':
         {
@@ -1064,7 +1064,7 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
 
       for (std::size_t alt_idx = 1; alt_idx <= var.alts().size(); ++alt_idx)
       {
-        if (af[alt_idx - 1] >= args.rare_threshold()) continue;
+        if (af[alt_idx - 1] > args.rare_threshold()) continue;
 
         scalar_type consequence_weight = 1.;
         bool process_allele = true;
@@ -1077,8 +1077,22 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
             auto ann_fields = utility::split_string_to_vector(*it, '|');
             if (ann_fields.size() > 2 && ann_fields[0] == allele)
             {
-              if ((args.impacts().size() && args.impacts().find(ann_fields[2]) != args.impacts().end()) || (args.consequences().size() && args.consequences().find(ann_fields[2]) != args.consequences().end()))
+              if (args.impacts().size() && args.impacts().find(ann_fields[2]) != args.impacts().end())
+              {
                 process_allele = true;
+              }
+              else if (args.consequences().size())
+              {
+                auto consequence_fields = utility::split_string_to_vector(ann_fields[1], '&');
+                for (auto& c : consequence_fields)
+                {
+                  if (args.consequences().find(c) != args.consequences().end())
+                  {
+                    process_allele = true;
+                    break;
+                  }
+                }
+              }
             }
           }
         }
