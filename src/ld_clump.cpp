@@ -27,6 +27,7 @@ private:
   double r2_threshold_ = 0.2;
   std::uint32_t seed_ = 7;
   bool write_all_ = false;
+  bool ignore_pheno_column_ = false;
   bool help_ = false;
   bool version_ = false;
 public:
@@ -37,6 +38,7 @@ public:
       {"max-pvalue", "<real>", 'p', "Max p-value to clump"},
       {"r2-threshold", "<real>", 's', "R-squared threshold for clumping (default: 0.2)"},
       {"write-all", "", 'a', "Write all records to output instead of only the most significant association from each LD group"},
+      {"ignore-pheno-column", "", 'i', "Do not group results by pheno_id"},
       {"version", "", 'v', "Print version"}})
   {
   }
@@ -51,6 +53,7 @@ public:
   bool help_is_set() const { return help_; }
   bool version_is_set() const { return version_; }
   bool write_all() const { return write_all_; }
+  bool ignore_pheno_column() const { return ignore_pheno_column_; }
 
   bool parse(int argc, char** argv)
   {
@@ -64,6 +67,9 @@ public:
       case 'h':
         help_ = true;
         return true;
+      case 'i':
+        ignore_pheno_column_ = true;
+        break;
       case 'o':
         output_path_ = optarg ? optarg : "";
         break;
@@ -215,6 +221,23 @@ int main(int argc, char** argv)
   std::vector<savvy::compressed_vector<std::int8_t>> genotypes;
   if (!load_variant_id_genotypes(args.geno_path(), variant_ids, genotypes))
     return std::cerr << "Error: failed to load genotypes\n", EXIT_FAILURE;
+
+  if (args.ignore_pheno_column())
+  {
+    decltype(pheno_results) tmp;
+    std::size_t tmp_sz = 0;
+    for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
+      tmp_sz += it->second.size();
+
+    std::vector<results_file::record*>& v = tmp[""];
+    v.reserve(tmp_sz);
+
+    for (auto it = pheno_results.begin(); it != pheno_results.end(); ++it)
+      v.insert(v.end(), it->second.begin(), it->second.end());
+
+    assert(v.size() == tmp_sz);
+    std::swap(pheno_results, tmp);
+  }
   //========== END Load input ==========//
 
   //========== Run clumping ==========//
@@ -232,25 +255,25 @@ int main(int argc, char** argv)
 
       for (std::int32_t group = 1; it->second.size() > 0; ++group)
       {
-        double min_pvalue = 2.;
-        std::size_t min_idx = std::size_t(-1);
+        double max_tstat = -1.;
+        std::size_t max_idx = std::size_t(-1);
 
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
-          if (it->second[i]->pvalue() < min_pvalue)
+          if (std::abs(it->second[i]->tstat()) > max_tstat)
           {
-            min_pvalue = it->second[i]->pvalue();
-            min_idx = i;
+            max_tstat = std::abs(it->second[i]->tstat());
+            max_idx = i;
           }
         }
 
-        assert(min_idx < it->second.size());
+        assert(max_idx < it->second.size());
 
-        it->second[min_idx]->set_group(group);
-        it->second[min_idx]->set_tophit();
+        it->second[max_idx]->set_group(group);
+        it->second[max_idx]->set_tophit();
 
-        assert(it->second[min_idx]->genotype_index() < genotypes.size());
-        auto& top_sparse_geno = genotypes[it->second[min_idx]->genotype_index()];
+        assert(it->second[max_idx]->genotype_index() < genotypes.size());
+        auto& top_sparse_geno = genotypes[it->second[max_idx]->genotype_index()];
         dense_geno.clear();
         dense_geno.resize(top_sparse_geno.size());
         for (auto gt = top_sparse_geno.begin(); gt != top_sparse_geno.end(); ++gt)
@@ -258,7 +281,7 @@ int main(int argc, char** argv)
 
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
-          if (i != min_idx)
+          if (i != max_idx)
           {
             double r2 = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
             if (r2 >= args.r2_threshold())

@@ -82,6 +82,7 @@ public:
     variant_id_t variant_id_;
     std::string string_variant_id_;
     double pvalue_ = 2.;
+    double tstat_ = std::numeric_limits<double>::quiet_NaN();
     std::string pheno_id_;
     std::int32_t clump_group_ = 0;
     std::size_t genotype_idx_ = std::size_t(-1);
@@ -90,6 +91,7 @@ public:
   public:
     virtual ~record() {}
     double pvalue() const { return pvalue_; }
+    double tstat() const { return tstat_; }
     const std::string& pheno_id() const { return pheno_id_; }
     void set_group(std::int32_t v) { clump_group_ = v; }
     std::int32_t group() const { return clump_group_; }
@@ -113,7 +115,7 @@ public:
       if (!std::getline(ifs, self.line_))
         return false;
 
-      std::size_t end_i = expect_pheno_column ? 14 : 9;
+      std::size_t end_i = expect_pheno_column ? 14 : 11;
       std::size_t start_pos = 0;
       for (std::size_t i = 0; i < end_i; ++i)
       {
@@ -137,6 +139,10 @@ public:
           self.string_variant_id_ = self.line_.substr(start_pos, pos - start_pos);
         else if (i == 8)
           self.pvalue_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
+        else if (i == 9) // Beta
+          self.tstat_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
+        else if (i == 10) // SE
+          self.tstat_ = self.tstat_ / std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
         else if (i == 13)
           self.pheno_id_ = self.line_.substr(start_pos, pos - start_pos);
 
