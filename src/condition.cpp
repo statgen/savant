@@ -467,7 +467,7 @@ int main(int argc, char** argv)
         dense_genos_mask[max_idx] = 1; // do not test this variant anymore
 
         assert(max_idx < dense_genos.size());
-        auto& top_geno = dense_genos[max_idx];
+        std::vector<scalar_type> top_geno = dense_genos[max_idx];
 
         //~~~~~~~~~~ regress out top genotype ~~~~~~~~~~//
         ++dof_subtrahend;
@@ -572,7 +572,7 @@ int main(int argc, char** argv)
                 std::inner_product(dense_geno_resid.begin(), dense_geno_resid.end(), pheno_resid_invnorm.begin(), scalar_type()),
                 linear_model::variable_stats<scalar_type>(dense_geno_resid),
                 pheno_resid_invnorm_summary,
-                pheno_resid_invnorm.size() - covariate_residualizer.n_predictors() + 2);
+                pheno_resid_invnorm.size() - (covariate_residualizer.n_predictors() + 2));
 
               if (std::abs(s.t) > max_abs_t)
               {
