@@ -542,6 +542,9 @@ int main(int argc, char** argv)
           }
         }
 
+        xt::xtensor<scalar_type, 1> rms = xt::sqrt(xt::mean(xt::square(cond_cov_mat), {0}));
+        cond_cov_mat = cond_cov_mat / rms;
+
         std::vector<linear_model::stats_t> top_assoc_vec;
         std::vector<std::size_t> top_assoc_idx_vec;
         top_assoc_vec.reserve(geno_cov_indices.size());
@@ -568,6 +571,9 @@ int main(int argc, char** argv)
               // linear_model::residualize(dense_genos[g_idx], dense_geno_stats[g_idx], top_geno, top_geno_summary);
               // dense_geno_stats[g_idx] = linear_model::variable_stats<scalar_type>(dense_genos[g_idx]);
               dense_geno_resid = covariate_residualizer(dense_genos[i], false);
+              scalar_type lrms = std::sqrt(std::inner_product(dense_geno_resid.begin(), dense_geno_resid.end(), dense_geno_resid.begin(), scalar_type()) / dense_geno_resid.size());
+              std::transform(dense_geno_resid.begin(), dense_geno_resid.end(), dense_geno_resid.begin(), std::bind(std::divides<scalar_type>(), std::placeholders::_1, lrms));
+
               auto s = linear_model::ols(pheno_resid_invnorm.size(),
                 std::inner_product(dense_geno_resid.begin(), dense_geno_resid.end(), pheno_resid_invnorm.begin(), scalar_type()),
                 linear_model::variable_stats<scalar_type>(dense_geno_resid),
