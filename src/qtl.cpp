@@ -864,6 +864,7 @@ bool process_burden_vector(const savvy::genomic_region& reg, const std::string& 
     }
 
     std::int64_t n_carriers = n - std::count(burden_sub.begin(), burden_sub.end(), scalar_type());
+    if (n_carriers < args.min_mac()) continue;
 
     burden_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](burden_sub, false);
 
