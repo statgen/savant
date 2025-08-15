@@ -142,7 +142,7 @@ typedef savvy::compressed_vector<std::int8_t> vec_t;
   return r2;
 }*/
 
-double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_vec, const vec_t& j_vec, double min_r2_threshold)
+double compute_r(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_vec, const vec_t& j_vec, double min_r2_threshold)
 {
 
   std::size_t n_haplotypes = i_vec.size();
@@ -176,10 +176,16 @@ double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_ve
 
     double r = (p / static_cast<double>(n_haplotypes) - freq_i * freq_j) / denom;
 
-    return r * r;
+    return r;
   }
 
   return std::numeric_limits<float>::quiet_NaN();
+}
+
+double compute_r2(const std::vector<std::int8_t>& i_vec_dense, const vec_t& i_vec, const vec_t& j_vec, double min_r2_threshold)
+{
+  double r = compute_r(i_vec_dense, i_vec, j_vec, min_r2_threshold);
+  return r * r;
 }
 
 
@@ -281,11 +287,14 @@ int main(int argc, char** argv)
 
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
-          if (i != max_idx)
+          double r = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
+          double r2 = r * r;
+
+          if (r2 >= args.r2_threshold())
           {
-            double r2 = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
-            if (r2 >= args.r2_threshold())
-              it->second[i]->set_group(group);
+            //if (i != max_idx)
+            it->second[i]->set_group(group);
+            it->second[i]->set_clump_r(r);
           }
         }
 
@@ -311,13 +320,19 @@ int main(int argc, char** argv)
   if (!output_file)
     return std::cerr << "Error: opening output file failed\n", EXIT_FAILURE;
 
-  output_file << input_results.header_line() << "\tclump_group" << std::endl;
+  output_file << input_results.header_line() << "\tclump_group";
+  if (args.write_all())
+    output_file << "\tclump_lead\tclump_lead_r";
+  output_file << std::endl;
 
   for (auto it = records.begin(); it != records.end() && output_file; ++it)
   {
     if (args.write_all() || it->tophit())
     {
-      output_file << it->serialized_line() << "\t" << it->group() << "\n";
+      output_file << it->serialized_line() << "\t" << it->group();
+      if (args.write_all())
+        output_file << "\t" << int(it->tophit()) << "\t" << it->clump_r();
+      output_file.put('\n');
     }
   }
 

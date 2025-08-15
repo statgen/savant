@@ -84,6 +84,7 @@ public:
     double pvalue_ = 2.;
     double tstat_ = std::numeric_limits<double>::quiet_NaN();
     std::string pheno_id_;
+    double clump_r_ = std::numeric_limits<double>::quiet_NaN();
     std::int32_t clump_group_ = 0;
     std::size_t genotype_idx_ = std::size_t(-1);
     double score_ = std::numeric_limits<double>::quiet_NaN();
@@ -94,6 +95,8 @@ public:
     double tstat() const { return tstat_; }
     const std::string& pheno_id() const { return pheno_id_; }
     void set_group(std::int32_t v) { clump_group_ = v; }
+    void set_clump_r(double v) { clump_r_ = v; }
+    double clump_r() const { return clump_r_; }
     std::int32_t group() const { return clump_group_; }
     void set_score(double v) { score_ = v; }
     double score() const { return score_; }
