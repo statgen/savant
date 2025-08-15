@@ -50,6 +50,7 @@ private:
   collapse_method_t collapse_method_ = collapse_method_t::madsen_browning;
   double rare_threshold_ = 0.5;
   double min_mac_ = 1.0;
+  std::uint64_t min_carriers_;
   double min_maf_ = 0.f;
   double max_pval_ = 2.;
   double resid_geno_threshold_ = -1.;
@@ -73,6 +74,7 @@ public:
       {"fmt-field", "<string>", '\x02', "Format field to use (DS, HDS, or GT)"},
       {"help", "", 'h', "Print Usage"},
       {"inv-norm", "", '\x01', "Inverse normalize response"},
+      {"min-carriers", "<int>", '\x02', "Minimum carrier count for collapse tests (default: 1)"},
       {"min-mac", "<int>", '\x02', "Minimum minor allele count (default: 1)"},
       {"min-maf", "<real>", '\x02', "Minimum minor allele frequency (default: 0.0)"},
       {"output", "<file>", 'o', "Output path (default: /dev/stdout)"},
@@ -117,6 +119,7 @@ public:
   const std::unique_ptr<savvy::genomic_region>& region() const { return region_; }
   collapse_method_t collapse_method() const { return collapse_method_; }
   double rare_threshold() const { return rare_threshold_; }
+  std::uint64_t min_carriers() const { return min_carriers_; }
   double min_mac() const { return min_mac_; }
   double min_maf() const { return min_maf_; }
   double max_pval() const { return max_pval_; }
@@ -211,7 +214,11 @@ public:
         }
         break;
       case '\x02':
-        if (std::string("min-mac") == long_options_[long_index].name)
+        if (std::string("min-carriers") == long_options_[long_index].name)
+        {
+          min_carriers_ = (std::uint64_t)std::atoll(optarg ? optarg : "");
+        }
+        else if (std::string("min-mac") == long_options_[long_index].name)
         {
           min_mac_ = std::atof(optarg ? optarg : "");
         }
@@ -864,7 +871,7 @@ bool process_burden_vector(const savvy::genomic_region& reg, const std::string& 
     }
 
     std::int64_t n_carriers = n - std::count(burden_sub.begin(), burden_sub.end(), scalar_type());
-    if (n_carriers < args.min_mac()) continue;
+    if (n_carriers < args.min_carriers()) continue;
 
     burden_sub = residualizers[residualizers.size() == 1 ? 0 : pheno_idx](burden_sub, false);
 
@@ -1076,7 +1083,8 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
           for (auto it = ann_vec.begin(); it != ann_vec.end() && !process_allele; ++it)
           {
             auto ann_fields = utility::split_string_to_vector(*it, '|');
-            if (ann_fields.size() > 6 && ann_fields[0] == allele && (ann_fields[6] == reg_it->first || ann_fields[4] == reg_it->first))
+            // for feature IDs we are performing a prefix match so that transcript ID versions can be excluded if not specified in BED file.
+            if (ann_fields.size() > 6 && ann_fields[0] == allele && (ann_fields[6].compare(0, reg_it->first.size(), reg_it->first) == 0 || ann_fields[4] == reg_it->first))
             {
               if (args.impacts().size() && args.impacts().find(ann_fields[2]) != args.impacts().end())
               {
