@@ -1076,7 +1076,7 @@ bool process_collapse(const std::vector<std::vector<scalar_type>>& pheno_resids,
           for (auto it = ann_vec.begin(); it != ann_vec.end() && !process_allele; ++it)
           {
             auto ann_fields = utility::split_string_to_vector(*it, '|');
-            if (ann_fields.size() > 2 && ann_fields[0] == allele)
+            if (ann_fields.size() > 6 && ann_fields[0] == allele && (ann_fields[6] == reg_it->first || ann_fields[4] == reg_it->first))
             {
               if (args.impacts().size() && args.impacts().find(ann_fields[2]) != args.impacts().end())
               {
