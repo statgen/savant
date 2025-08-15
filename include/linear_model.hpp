@@ -27,6 +27,7 @@ protected:
   res_t residuals_;
   scalar_type s_y_;
   scalar_type s_yy_;
+  std::size_t n_covariates_;
 public:
   struct stats_t
   {
@@ -101,6 +102,7 @@ public:
     using namespace xt;
     using namespace xt::linalg;
 
+    n_covariates_ = x_orig.shape()[1];
     cov_t x = concatenate(xtuple(xt::ones<scalar_type>({y.size(), std::size_t(1)}), x_orig), 1);
     auto pbetas = dot(dot(pinv(dot(transpose(x), x)), transpose(x)), y);
 
@@ -146,9 +148,9 @@ public:
 //      se_x_mean += square(x[i] - x_mean);
 //    }
 
-    const scalar_type dof     = n - 2;
+    const scalar_type dof     = n - 2 - n_covariates_; // n_covariates_ does not included intercept
     //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
     scalar_type r = (n * s_xy - s_x * s_y_) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy_ - s_y_ * s_y_ ));
 
@@ -198,9 +200,9 @@ public:
     //scalar_type se2 = 1./(n*(n-2)) * (n*s_yy_ - s_y_*s_y_ - square(m)*(n*s_xx - square(s_x)));
     scalar_type r = (n * s_xy - s_x * s_y_) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy_ - s_y_ * s_y_ ));
 
-    const scalar_type dof = n - 2;
+    const scalar_type dof = n - 2 - n_covariates_; // n_covariates_ does not included intercept
     //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy_ - s_y_ * s_y_ - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
@@ -226,7 +228,7 @@ public:
 
     scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
 
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
@@ -272,7 +274,7 @@ public:
 
     //const scalar_type dof     = n - 2;
     //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
     scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
 
@@ -323,7 +325,7 @@ public:
 
     //const scalar_type dof = n - 2;
     //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
@@ -369,7 +371,7 @@ public:
 
     //const scalar_type dof = n - 2;
     //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
@@ -415,7 +417,7 @@ public:
 
     //const scalar_type dof = n - 2;
     //const scalar_type std_err_old = std::sqrt(se2) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
 
     boost::math::students_t_distribution<scalar_type> dist(dof);
@@ -459,7 +461,7 @@ public:
 
     //const scalar_type dof     = n - 2;
     //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
     scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
 
@@ -505,7 +507,7 @@ public:
 
     //const scalar_type dof     = n - 2;
     //const scalar_type std_err = std::sqrt(se_line / dof) / std::sqrt(se_x_mean);
-    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / ((n-2) * (n * s_xx - s_x * s_x)));
+    const scalar_type std_err = std::sqrt((n * s_yy - s_y * s_y - m * m * (n * s_xx - s_x * s_x)) / (dof * (n * s_xx - s_x * s_x)));
     scalar_type t = m / std_err;
     scalar_type r = (n * s_xy - s_x * s_y) / std::sqrt((n * s_xx - s_x * s_x) * (n * s_yy - s_y * s_y));
 
