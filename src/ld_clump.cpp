@@ -287,7 +287,7 @@ int main(int argc, char** argv)
 
         for (std::size_t i = 0; i < it->second.size(); ++i)
         {
-          double r = compute_r2(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
+          double r = compute_r(dense_geno, top_sparse_geno, genotypes[it->second[i]->genotype_index()], args.r2_threshold());
           double r2 = r * r;
 
           if (r2 >= args.r2_threshold())
