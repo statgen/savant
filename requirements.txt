@@ -1,5 +1,5 @@
 statgen/savvy@5d0cd9da476223e2bbe1c85d02601fbe148aadbb
 jonathonl/omp@develop
-xtensor-stack/xtl
-xtensor-stack/xtensor
-xtensor-stack/xtensor-blas
+xtensor-stack/xtl@0.7.2
+xtensor-stack/xtensor@0.23.10
+xtensor-stack/xtensor-blas@0.19.1
