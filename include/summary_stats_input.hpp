@@ -118,7 +118,7 @@ public:
       if (!std::getline(ifs, self.line_))
         return false;
 
-      std::size_t end_i = expect_pheno_column ? 14 : 11;
+      std::size_t end_i = expect_pheno_column ? 14 : 12;
       std::size_t start_pos = 0;
       for (std::size_t i = 0; i < end_i; ++i)
       {
@@ -142,10 +142,12 @@ public:
           self.string_variant_id_ = self.line_.substr(start_pos, pos - start_pos);
         else if (i == 8)
           self.pvalue_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
-        else if (i == 9) // Beta
+        else if (i == 11) // tstat
+          self.tstat_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
+ /*       else if (i == 9) // Beta
           self.tstat_ = std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
         else if (i == 10) // SE
-          self.tstat_ = self.tstat_ / std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());
+          self.tstat_ = self.tstat_ / std::atof(self.line_.substr(start_pos, pos - start_pos).c_str());*/
         else if (i == 13)
           self.pheno_id_ = self.line_.substr(start_pos, pos - start_pos);
 
